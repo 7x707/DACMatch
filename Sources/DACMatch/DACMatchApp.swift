@@ -74,6 +74,11 @@ private struct DACMatchMenu: View {
                 }
             }
 
+            Button("立即重新匹配") {
+                state.forceRematch()
+            }
+            .disabled(state.track == nil)
+
             Button(state.launchAtLogin ? "关闭登录时启动" : "登录时启动") {
                 state.setLaunchAtLogin(!state.launchAtLogin)
             }

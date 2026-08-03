@@ -21,7 +21,12 @@ final class AppState: ObservableObject {
     }
     @Published private(set) var launchAtLogin = false
     @Published var dacLockDelaySeconds: Double {
-        didSet { defaults.set(dacLockDelaySeconds, forKey: Keys.dacLockDelay) }
+        didSet {
+            defaults.set(dacLockDelaySeconds, forKey: Keys.dacLockDelay)
+            lastAppliedTrackID = nil
+            switchAttemptsForTrack = 0
+            statusText = "等待时间已更新，准备重新匹配"
+        }
     }
 
     private let defaults: UserDefaults
@@ -31,6 +36,8 @@ final class AppState: ObservableObject {
     private var lastAppliedTrackID: String?
     private var consecutiveErrorKey: String?
     private var isSwitching = false
+    private var observedTrackID: String?
+    private var switchAttemptsForTrack = 0
 
     private enum Keys {
         static let autoMatch = "autoMatchEnabled"
@@ -95,6 +102,13 @@ final class AppState: ObservableObject {
         }
     }
 
+    func forceRematch() {
+        lastAppliedTrackID = nil
+        switchAttemptsForTrack = 0
+        statusText = "正在重新匹配…"
+        poll()
+    }
+
     var selectedDevice: AudioDevice? {
         devices.first { $0.uid == selectedDeviceUID }
     }
@@ -123,8 +137,15 @@ final class AppState: ObservableObject {
             guard let newTrack else {
                 statusText = "Apple Music 未在播放"
                 lastAppliedTrackID = nil
+                observedTrackID = nil
+                switchAttemptsForTrack = 0
                 refreshDeviceRate()
                 return
+            }
+            if observedTrackID != newTrack.persistentID {
+                observedTrackID = newTrack.persistentID
+                switchAttemptsForTrack = 0
+                lastAppliedTrackID = nil
             }
             guard newTrack.sampleRate > 0 else {
                 statusText = "当前曲目没有可用的采样率信息"
@@ -132,10 +153,6 @@ final class AppState: ObservableObject {
             }
             guard autoMatchEnabled else {
                 statusText = "自动匹配已暂停"
-                refreshDeviceRate()
-                return
-            }
-            guard lastAppliedTrackID != newTrack.persistentID else {
                 refreshDeviceRate()
                 return
             }
@@ -152,7 +169,15 @@ final class AppState: ObservableObject {
                 return
             }
 
+            deviceSampleRate = currentRate
+            lastAppliedTrackID = nil
+            guard switchAttemptsForTrack < 3 else {
+                statusText = "输出仍不匹配，请点“立即重新匹配”"
+                return
+            }
+
             isSwitching = true
+            switchAttemptsForTrack += 1
             statusText = "正在安全切换采样率…"
             Task { @MainActor [weak self] in
                 await self?.switchSampleRate(
@@ -200,9 +225,22 @@ final class AppState: ObservableObject {
                 throw CoreAudioError.propertyUnavailable("DAC 未确认新的采样率")
             }
 
-            deviceSampleRate = confirmedRate
+            try musicMonitor.play()
+            didPause = false
+
+            // Verify again after Music recreates its output stream. Some devices or
+            // players can restore the previous hardware rate during resume.
+            try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
+            let postResumeRate = try audioManager.currentSampleRate(for: device.id)
+            deviceSampleRate = postResumeRate
+            guard abs(postResumeRate - rate) < 1 else {
+                throw CoreAudioError.propertyUnavailable(
+                    "恢复播放后输出回到 \(SampleRateFormatter.string(postResumeRate))"
+                )
+            }
+
             lastAppliedTrackID = trackID
-            statusText = "采样率已匹配，即将恢复播放"
+            statusText = "采样率已匹配"
         } catch {
             setError(error)
         }
