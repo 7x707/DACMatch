@@ -7,6 +7,17 @@ struct MusicTrack: Equatable, Sendable {
     let sampleRate: Double
 }
 
+enum MusicPlaybackState: String, Sendable {
+    case playing
+    case paused
+    case stopped
+}
+
+struct MusicPlaybackSnapshot: Sendable {
+    let state: MusicPlaybackState
+    let track: MusicTrack?
+}
+
 enum MusicMonitorError: LocalizedError {
     case scriptFailed(String)
     case invalidResponse
@@ -22,17 +33,28 @@ enum MusicMonitorError: LocalizedError {
 struct MusicMonitor {
     private static let script = """
     tell application "Music"
-        if player state is not playing then return ""
-        set currentItem to current track
-        set trackID to persistent ID of currentItem as text
-        set trackName to name of currentItem as text
-        set trackArtist to artist of currentItem as text
-        set trackRate to sample rate of currentItem as text
-        return trackID & (ASCII character 30) & trackName & (ASCII character 30) & trackArtist & (ASCII character 30) & trackRate
+        if player state is playing then
+            set stateText to "playing"
+        else if player state is paused then
+            set stateText to "paused"
+        else
+            set stateText to "stopped"
+        end if
+
+        try
+            set currentItem to current track
+            set trackID to persistent ID of currentItem as text
+            set trackName to name of currentItem as text
+            set trackArtist to artist of currentItem as text
+            set trackRate to sample rate of currentItem as text
+            return stateText & (ASCII character 30) & trackID & (ASCII character 30) & trackName & (ASCII character 30) & trackArtist & (ASCII character 30) & trackRate
+        on error
+            return stateText
+        end try
     end tell
     """
 
-    func currentTrack() throws -> MusicTrack? {
+    func snapshot() throws -> MusicPlaybackSnapshot {
         guard let appleScript = NSAppleScript(source: Self.script) else {
             throw MusicMonitorError.scriptFailed("无法创建自动化脚本")
         }
@@ -44,17 +66,28 @@ struct MusicMonitor {
         }
 
         guard let value = result.stringValue else { throw MusicMonitorError.invalidResponse }
-        if value.isEmpty { return nil }
+        return try Self.parseSnapshot(value)
+    }
 
+    static func parseSnapshot(_ value: String) throws -> MusicPlaybackSnapshot {
         let fields = value.components(separatedBy: String(UnicodeScalar(30)))
-        guard fields.count == 4, let rate = Double(fields[3]) else {
+        guard let state = MusicPlaybackState(rawValue: fields[0]) else {
             throw MusicMonitorError.invalidResponse
         }
-        return MusicTrack(
-            persistentID: fields[0],
-            name: fields[1],
-            artist: fields[2],
-            sampleRate: rate
+        guard fields.count > 1 else {
+            return MusicPlaybackSnapshot(state: state, track: nil)
+        }
+        guard fields.count == 5, let rate = Double(fields[4]) else {
+            throw MusicMonitorError.invalidResponse
+        }
+        return MusicPlaybackSnapshot(
+            state: state,
+            track: MusicTrack(
+                persistentID: fields[1],
+                name: fields[2],
+                artist: fields[3],
+                sampleRate: rate
+            )
         )
     }
 

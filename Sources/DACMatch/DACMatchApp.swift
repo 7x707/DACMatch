@@ -74,6 +74,11 @@ private struct DACMatchMenu: View {
                 }
             }
 
+            Button("匹配并播放") {
+                state.matchAndPlay()
+            }
+            .disabled(state.track == nil)
+
             Button("立即重新匹配") {
                 state.forceRematch()
             }

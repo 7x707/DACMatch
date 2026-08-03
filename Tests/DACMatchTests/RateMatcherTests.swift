@@ -22,3 +22,20 @@ import Testing
     #expect(SampleRateFormatter.string(44_100) == "44.1 kHz")
     #expect(SampleRateFormatter.string(96_000) == "96 kHz")
 }
+
+@Test func pausedMusicSnapshotKeepsCurrentTrack() throws {
+    let separator = String(UnicodeScalar(30))
+    let value = ["paused", "TRACK-1", "Example", "Artist", "96000"]
+        .joined(separator: separator)
+    let snapshot = try MusicMonitor.parseSnapshot(value)
+
+    #expect(snapshot.state == .paused)
+    #expect(snapshot.track?.persistentID == "TRACK-1")
+    #expect(snapshot.track?.sampleRate == 96_000)
+}
+
+@Test func stoppedMusicSnapshotCanHaveNoTrack() throws {
+    let snapshot = try MusicMonitor.parseSnapshot("stopped")
+    #expect(snapshot.state == .stopped)
+    #expect(snapshot.track == nil)
+}
