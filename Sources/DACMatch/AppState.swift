@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CoreAudio
 import Foundation
 import ServiceManagement
 
@@ -99,16 +100,12 @@ final class AppState: ObservableObject {
     }
 
     func selectDevice(_ device: AudioDevice) {
-        do {
-            try audioManager.setDefaultOutputDevice(device.id)
-            selectedDeviceUID = device.uid
-            switchAttemptsForTrack = 0
-            nextRetryDate = nil
-            diagnosticText = nil
-            refreshDevices()
-            statusText = "系统输出已切换到 \(device.name)"
-        } catch {
-            setError(error)
+        guard !isSwitching else { return }
+        isSwitching = true
+        statusText = "正在安全切换到 \(device.name)…"
+        diagnosticText = nil
+        Task { @MainActor [weak self] in
+            await self?.switchOutputDevice(to: device)
         }
     }
 
@@ -338,6 +335,106 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func switchOutputDevice(to device: AudioDevice) async {
+        var needsResume = false
+        var resumePosition: Double?
+        var stage = "准备切换输出设备"
+
+        defer {
+            if needsResume {
+                try? musicMonitor.play()
+                if let resumePosition { try? musicMonitor.setPlayerPosition(resumePosition) }
+            }
+            isSwitching = false
+        }
+
+        do {
+            let snapshot = try musicMonitor.snapshot()
+            let currentTrack = snapshot.track ?? track
+            let wasPlaying = snapshot.state == .playing
+
+            if wasPlaying {
+                resumePosition = try? musicMonitor.playerPosition()
+                stage = "暂停 Apple Music"
+                try musicMonitor.pause()
+                needsResume = true
+
+                // Let Music release the stream owned by the previous output device.
+                try await Task<Never, Never>.sleep(nanoseconds: 650_000_000)
+            }
+
+            stage = "切换系统输出设备"
+            try audioManager.setDefaultOutputDevice(device.id)
+
+            stage = "确认系统输出设备"
+            try await waitForDefaultOutputDevice(device.id, timeout: 2.0)
+            selectedDeviceUID = device.uid
+
+            // Give macOS time to publish the new route before configuring its clock.
+            try await Task<Never, Never>.sleep(nanoseconds: 350_000_000)
+
+            if let currentTrack, currentTrack.sampleRate > 0 {
+                stage = "写入新设备采样率"
+                let currentRate = try audioManager.currentSampleRate(for: device.id)
+                if abs(currentRate - currentTrack.sampleRate) >= 1 {
+                    try audioManager.setSampleRate(currentTrack.sampleRate, for: device)
+                }
+
+                stage = "等待新设备稳定锁定"
+                deviceSampleRate = try await waitForStableSampleRate(
+                    currentTrack.sampleRate,
+                    device: device,
+                    timeout: max(1.0, dacLockDelaySeconds) + 0.5,
+                    stableFor: 0.35
+                )
+                lastAppliedTrackID = currentTrack.persistentID
+            } else {
+                deviceSampleRate = try? audioManager.currentSampleRate(for: device.id)
+                lastAppliedTrackID = nil
+            }
+
+            if wasPlaying {
+                stage = "在新设备上恢复 Apple Music"
+                try musicMonitor.play()
+                needsResume = false
+                if let resumePosition {
+                    try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
+                    try? musicMonitor.setPlayerPosition(resumePosition)
+                }
+
+                stage = "确认新设备音频流"
+                do {
+                    try await waitForDeviceToStartRunning(device.id, timeout: 1.2)
+                } catch {
+                    // The route and clock can look correct while Music still owns a
+                    // stale stream. Reopen it once before reporting success.
+                    stage = "重新建立新设备音频流"
+                    try musicMonitor.pause()
+                    needsResume = true
+                    try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
+                    try musicMonitor.play()
+                    needsResume = false
+                    if let resumePosition {
+                        try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
+                        try? musicMonitor.setPlayerPosition(resumePosition)
+                    }
+                    try await waitForDeviceToStartRunning(device.id, timeout: 1.5)
+                }
+            }
+
+            switchAttemptsForTrack = 0
+            nextRetryDate = nil
+            diagnosticText = nil
+            statusText = wasPlaying
+                ? "已切换到 \(device.name)，正在播放"
+                : "系统输出已切换到 \(device.name)"
+            refreshDevices()
+        } catch {
+            diagnosticText = "\(stage)：\(error.localizedDescription)"
+            statusText = "切换到 \(device.name) 失败"
+        }
+    }
+
     private func rebuildAudioStream() async {
         var needsResume = false
         let position = try? musicMonitor.playerPosition()
@@ -395,6 +492,34 @@ final class AppState: ObservableObject {
         throw CoreAudioError.propertyUnavailable(
             "等待 \(SampleRateFormatter.string(targetRate)) 超时，最后检测到 \(SampleRateFormatter.string(lastObservedRate))"
         )
+    }
+
+    private func waitForDefaultOutputDevice(
+        _ targetDeviceID: AudioObjectID,
+        timeout: TimeInterval
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if try audioManager.currentDefaultOutputDeviceID() == targetDeviceID {
+                return
+            }
+            try await Task<Never, Never>.sleep(nanoseconds: 100_000_000)
+        }
+        throw CoreAudioError.propertyUnavailable("系统没有确认新的默认输出设备")
+    }
+
+    private func waitForDeviceToStartRunning(
+        _ deviceID: AudioObjectID,
+        timeout: TimeInterval
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if try audioManager.isDeviceRunning(deviceID) {
+                return
+            }
+            try await Task<Never, Never>.sleep(nanoseconds: 100_000_000)
+        }
+        throw CoreAudioError.propertyUnavailable("新输出设备没有检测到音频流")
     }
 
     private func scheduleRetry(afterFailureAt stage: String, error: Error) {

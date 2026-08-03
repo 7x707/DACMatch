@@ -51,7 +51,7 @@ struct CoreAudioDeviceManager: Sendable {
             "读取音频设备列表"
         )
 
-        let defaultID = try? defaultOutputDeviceID()
+        let defaultID = try? currentDefaultOutputDeviceID()
         return ids.compactMap { id in
             guard hasOutputStreams(id),
                   let uid = try? stringProperty(id, kAudioDevicePropertyDeviceUID),
@@ -132,15 +132,7 @@ struct CoreAudioDeviceManager: Sendable {
         )
     }
 
-    private var nominalSampleRateAddress: AudioObjectPropertyAddress {
-        AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyNominalSampleRate,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-    }
-
-    private func defaultOutputDeviceID() throws -> AudioObjectID {
+    func currentDefaultOutputDeviceID() throws -> AudioObjectID {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultOutputDevice,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -160,6 +152,29 @@ struct CoreAudioDeviceManager: Sendable {
             "读取默认输出设备"
         )
         return id
+    }
+
+    func isDeviceRunning(_ deviceID: AudioObjectID) throws -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var isRunning: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        try check(
+            AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &isRunning),
+            "检查输出设备音频流"
+        )
+        return isRunning != 0
+    }
+
+    private var nominalSampleRateAddress: AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
     }
 
     private func hasOutputStreams(_ deviceID: AudioObjectID) -> Bool {
