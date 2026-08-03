@@ -54,6 +54,18 @@ struct MusicMonitor {
     end tell
     """
 
+    private static let artworkScript = """
+    tell application "Music"
+        try
+            set currentItem to current track
+            if (count of artworks of currentItem) is 0 then return missing value
+            return raw data of artwork 1 of currentItem
+        on error
+            return missing value
+        end try
+    end tell
+    """
+
     func snapshot() throws -> MusicPlaybackSnapshot {
         guard let appleScript = NSAppleScript(source: Self.script) else {
             throw MusicMonitorError.scriptFailed("无法创建自动化脚本")
@@ -89,6 +101,21 @@ struct MusicMonitor {
                 sampleRate: rate
             )
         )
+    }
+
+    func currentArtworkData() throws -> Data? {
+        guard let appleScript = NSAppleScript(source: Self.artworkScript) else {
+            throw MusicMonitorError.scriptFailed("无法创建封面读取脚本")
+        }
+        var error: NSDictionary?
+        let result = appleScript.executeAndReturnError(&error)
+        if let error {
+            let message = error[NSAppleScript.errorMessage] as? String ?? error.description
+            throw MusicMonitorError.scriptFailed(message)
+        }
+
+        guard result.descriptorType != typeNull else { return nil }
+        return result.data
     }
 
     func pause() throws {

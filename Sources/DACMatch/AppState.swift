@@ -8,8 +8,10 @@ final class AppState: ObservableObject {
     @Published private(set) var devices: [AudioDevice] = []
     @Published private(set) var track: MusicTrack?
     @Published private(set) var playbackState: MusicPlaybackState = .stopped
+    @Published private(set) var artworkImage: NSImage?
     @Published private(set) var deviceSampleRate: Double?
     @Published private(set) var statusText = "正在启动…"
+    @Published private(set) var diagnosticText: String?
     @Published var autoMatchEnabled: Bool {
         didSet { defaults.set(autoMatchEnabled, forKey: Keys.autoMatch) }
     }
@@ -26,6 +28,8 @@ final class AppState: ObservableObject {
             defaults.set(dacLockDelaySeconds, forKey: Keys.dacLockDelay)
             lastAppliedTrackID = nil
             switchAttemptsForTrack = 0
+            nextRetryDate = nil
+            diagnosticText = nil
             statusText = "等待时间已更新，准备重新匹配"
         }
     }
@@ -39,6 +43,11 @@ final class AppState: ObservableObject {
     private var isSwitching = false
     private var observedTrackID: String?
     private var switchAttemptsForTrack = 0
+    private var nextRetryDate: Date?
+    private let maximumSwitchAttempts = 4
+    private var artworkTrackID: String?
+    private var artworkLoadAttempts = 0
+    private var nextArtworkLoadDate: Date?
 
     private enum Keys {
         static let autoMatch = "autoMatchEnabled"
@@ -106,53 +115,10 @@ final class AppState: ObservableObject {
     func forceRematch() {
         lastAppliedTrackID = nil
         switchAttemptsForTrack = 0
+        nextRetryDate = nil
+        diagnosticText = nil
         statusText = "正在重新匹配…"
         poll()
-    }
-
-    func matchAndPlay() {
-        guard !isSwitching else { return }
-        do {
-            let snapshot = try musicMonitor.snapshot()
-            guard let currentTrack = snapshot.track else {
-                statusText = "请先在 Apple Music 中选择一首歌曲"
-                return
-            }
-            guard currentTrack.sampleRate > 0 else {
-                statusText = "当前曲目没有可用的采样率信息"
-                return
-            }
-            guard let device = selectedDevice else {
-                statusText = "请选择输出 DAC"
-                return
-            }
-
-            track = currentTrack
-            playbackState = snapshot.state
-            let currentRate = try audioManager.currentSampleRate(for: device.id)
-            deviceSampleRate = currentRate
-            if abs(currentRate - currentTrack.sampleRate) < 1 {
-                try musicMonitor.play()
-                playbackState = .playing
-                statusText = "采样率已匹配，正在播放"
-                return
-            }
-
-            switchAttemptsForTrack = 0
-            isSwitching = true
-            statusText = "正在匹配，完成后播放…"
-            Task { @MainActor [weak self] in
-                await self?.switchSampleRate(
-                    to: currentTrack.sampleRate,
-                    trackID: currentTrack.persistentID,
-                    device: device,
-                    musicWasPlaying: snapshot.state == .playing,
-                    playWhenFinished: true
-                )
-            }
-        } catch {
-            setError(error)
-        }
     }
 
     var selectedDevice: AudioDevice? {
@@ -187,6 +153,10 @@ final class AppState: ObservableObject {
                 lastAppliedTrackID = nil
                 observedTrackID = nil
                 switchAttemptsForTrack = 0
+                nextRetryDate = nil
+                artworkImage = nil
+                artworkTrackID = nil
+                artworkLoadAttempts = 0
                 refreshDeviceRate()
                 return
             }
@@ -194,7 +164,14 @@ final class AppState: ObservableObject {
                 observedTrackID = newTrack.persistentID
                 switchAttemptsForTrack = 0
                 lastAppliedTrackID = nil
+                nextRetryDate = nil
+                diagnosticText = nil
+                artworkImage = nil
+                artworkTrackID = newTrack.persistentID
+                artworkLoadAttempts = 0
+                nextArtworkLoadDate = nil
             }
+            loadArtworkIfNeeded(for: newTrack)
             guard newTrack.sampleRate > 0 else {
                 statusText = "当前曲目没有可用的采样率信息"
                 return
@@ -213,6 +190,8 @@ final class AppState: ObservableObject {
             if abs(currentRate - newTrack.sampleRate) < 1 {
                 lastAppliedTrackID = newTrack.persistentID
                 deviceSampleRate = currentRate
+                nextRetryDate = nil
+                diagnosticText = nil
                 statusText = snapshot.state == .playing
                     ? "采样率已匹配"
                     : "已预匹配，等待播放"
@@ -221,7 +200,11 @@ final class AppState: ObservableObject {
 
             deviceSampleRate = currentRate
             lastAppliedTrackID = nil
-            guard switchAttemptsForTrack < 3 else {
+            if let nextRetryDate, nextRetryDate > Date() {
+                statusText = "等待自动重试…"
+                return
+            }
+            guard switchAttemptsForTrack < maximumSwitchAttempts else {
                 statusText = "输出仍不匹配，请点“立即重新匹配”"
                 return
             }
@@ -251,6 +234,7 @@ final class AppState: ObservableObject {
         playWhenFinished: Bool
     ) async {
         var didPause = false
+        var stage = "准备切换"
         defer {
             if didPause {
                 do {
@@ -264,6 +248,7 @@ final class AppState: ObservableObject {
 
         do {
             if musicWasPlaying {
+                stage = "暂停 Apple Music"
                 try musicMonitor.pause()
                 didPause = true
 
@@ -271,40 +256,90 @@ final class AppState: ObservableObject {
                 // changing the hardware clock. Some USB DACs otherwise stop receiving audio.
                 try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
             }
+
+            stage = "写入 DAC 采样率"
             try audioManager.setSampleRate(rate, for: device)
 
-            // Let the DAC lock to the new clock before Music recreates its stream.
-            let lockDelay = UInt64(dacLockDelaySeconds * 1_000_000_000)
-            try await Task<Never, Never>.sleep(nanoseconds: lockDelay)
-            let confirmedRate = try audioManager.currentSampleRate(for: device.id)
-            guard abs(confirmedRate - rate) < 1 else {
-                throw CoreAudioError.propertyUnavailable("DAC 未确认新的采样率")
-            }
+            // Observe until the new rate stays stable instead of trusting one instant read.
+            // The selected lock delay is a maximum wait, not a mandatory fixed pause.
+            stage = "等待 DAC 稳定锁定"
+            let confirmedRate = try await waitForStableSampleRate(
+                rate,
+                device: device,
+                timeout: max(0.5, dacLockDelaySeconds) + 0.25,
+                stableFor: 0.25
+            )
 
             if playWhenFinished {
+                stage = "恢复 Apple Music"
                 try musicMonitor.play()
                 didPause = false
 
-                // Verify again after Music recreates its output stream. Some devices or
-                // players can restore the previous hardware rate during resume.
-                try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
-                let postResumeRate = try audioManager.currentSampleRate(for: device.id)
+                // A longer stable window catches devices that briefly report the target
+                // rate and then fall back while Music recreates its output stream.
+                stage = "验证恢复后的输出"
+                let postResumeRate = try await waitForStableSampleRate(
+                    rate,
+                    device: device,
+                    timeout: max(1.5, dacLockDelaySeconds + 0.6),
+                    stableFor: 0.6
+                )
                 deviceSampleRate = postResumeRate
-                guard abs(postResumeRate - rate) < 1 else {
-                    throw CoreAudioError.propertyUnavailable(
-                        "恢复播放后输出回到 \(SampleRateFormatter.string(postResumeRate))"
-                    )
-                }
                 playbackState = .playing
             } else {
                 deviceSampleRate = confirmedRate
             }
 
             lastAppliedTrackID = trackID
+            nextRetryDate = nil
+            diagnosticText = nil
             statusText = playWhenFinished ? "采样率已匹配，正在播放" : "已预匹配，等待播放"
         } catch {
-            setError(error)
+            scheduleRetry(afterFailureAt: stage, error: error)
         }
+    }
+
+    private func waitForStableSampleRate(
+        _ targetRate: Double,
+        device: AudioDevice,
+        timeout: TimeInterval,
+        stableFor requiredStableDuration: TimeInterval
+    ) async throws -> Double {
+        let deadline = Date().addingTimeInterval(timeout)
+        var stableSince: Date?
+        var lastObservedRate = try audioManager.currentSampleRate(for: device.id)
+
+        while Date() < deadline {
+            lastObservedRate = try audioManager.currentSampleRate(for: device.id)
+            if abs(lastObservedRate - targetRate) < 1 {
+                if stableSince == nil { stableSince = Date() }
+                if let stableSince,
+                   Date().timeIntervalSince(stableSince) >= requiredStableDuration {
+                    return lastObservedRate
+                }
+            } else {
+                stableSince = nil
+            }
+            try await Task<Never, Never>.sleep(nanoseconds: 100_000_000)
+        }
+
+        throw CoreAudioError.propertyUnavailable(
+            "等待 \(SampleRateFormatter.string(targetRate)) 超时，最后检测到 \(SampleRateFormatter.string(lastObservedRate))"
+        )
+    }
+
+    private func scheduleRetry(afterFailureAt stage: String, error: Error) {
+        diagnosticText = "\(stage)：\(error.localizedDescription)"
+        guard switchAttemptsForTrack < maximumSwitchAttempts else {
+            nextRetryDate = nil
+            statusText = "自动重试已暂停，请手动重新匹配"
+            return
+        }
+
+        let attemptIndex = Double(max(0, switchAttemptsForTrack - 1))
+        let delay = min(pow(2.0, attemptIndex) * 0.5, 3.0)
+        nextRetryDate = Date().addingTimeInterval(delay)
+        statusText = String(format: "匹配未稳定，%.1f 秒后重试", delay)
     }
 
     private func refreshDeviceRate() {
@@ -318,6 +353,22 @@ final class AppState: ObservableObject {
             deviceSampleRate = nil
             setError(error)
         }
+    }
+
+    private func loadArtworkIfNeeded(for currentTrack: MusicTrack) {
+        guard artworkTrackID == currentTrack.persistentID,
+              artworkImage == nil,
+              artworkLoadAttempts < 8
+        else { return }
+        if let nextArtworkLoadDate, nextArtworkLoadDate > Date() { return }
+
+        artworkLoadAttempts += 1
+        nextArtworkLoadDate = Date().addingTimeInterval(1)
+        guard let data = try? musicMonitor.currentArtworkData(),
+              let image = NSImage(data: data)
+        else { return }
+        artworkImage = image
+        nextArtworkLoadDate = nil
     }
 
     private func setError(_ error: Error) {

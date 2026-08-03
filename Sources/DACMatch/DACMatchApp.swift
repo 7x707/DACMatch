@@ -26,13 +26,17 @@ private struct DACMatchPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let track = state.track {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(track.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text(track.artist.isEmpty ? "未知艺人" : track.artist)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                HStack(spacing: 12) {
+                    artworkView
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(track.name)
+                            .font(.headline)
+                            .lineLimit(2)
+                        Text(track.artist.isEmpty ? "未知艺人" : track.artist)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             } else {
                 Text("Apple Music 未选择曲目")
@@ -56,6 +60,14 @@ private struct DACMatchPanel: View {
                 .foregroundStyle(statusColor)
                 .lineLimit(2)
                 .animation(.default, value: state.statusText)
+
+            if let diagnostic = state.diagnosticText {
+                Text(diagnostic)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+            }
 
             Divider()
 
@@ -98,19 +110,11 @@ private struct DACMatchPanel: View {
             .menuStyle(.borderlessButton)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 8) {
-                Button("匹配并播放") {
-                    state.matchAndPlay()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(state.track == nil)
-
-                Button("立即重新匹配") {
-                    state.forceRematch()
-                }
-                .buttonStyle(.bordered)
-                .disabled(state.track == nil)
+            Button("立即重新匹配") {
+                state.forceRematch()
             }
+            .buttonStyle(.bordered)
+            .disabled(state.track == nil)
 
             Toggle(
                 "登录时启动",
@@ -131,6 +135,26 @@ private struct DACMatchPanel: View {
         }
         .padding(16)
         .frame(width: 340)
+    }
+
+    private var artworkView: some View {
+        Group {
+            if let artwork = state.artworkImage {
+                Image(nsImage: artwork)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(.quaternary)
+                    Image(systemName: "waveform")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(width: 64, height: 64)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func infoRow(_ label: String, value: String) -> some View {
