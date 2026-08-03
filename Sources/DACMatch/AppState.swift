@@ -121,6 +121,16 @@ final class AppState: ObservableObject {
         poll()
     }
 
+    func recoverAudio() {
+        guard !isSwitching, track != nil else { return }
+        isSwitching = true
+        statusText = "正在重建 Apple Music 音频流…"
+        diagnosticText = nil
+        Task { @MainActor [weak self] in
+            await self?.rebuildAudioStream()
+        }
+    }
+
     var selectedDevice: AudioDevice? {
         devices.first { $0.uid == selectedDeviceUID }
     }
@@ -234,11 +244,15 @@ final class AppState: ObservableObject {
         playWhenFinished: Bool
     ) async {
         var didPause = false
+        var resumePosition: Double?
         var stage = "准备切换"
         defer {
             if didPause {
                 do {
                     try musicMonitor.play()
+                    if let resumePosition {
+                        try? musicMonitor.setPlayerPosition(resumePosition)
+                    }
                 } catch {
                     setError(error)
                 }
@@ -248,13 +262,19 @@ final class AppState: ObservableObject {
 
         do {
             if musicWasPlaying {
-                stage = "暂停 Apple Music"
-                try musicMonitor.pause()
+                resumePosition = try? musicMonitor.playerPosition()
+                if requiresFullStreamRestart(for: device) {
+                    stage = "停止并释放 Apple Music 音频流"
+                    try musicMonitor.stop()
+                } else {
+                    stage = "暂停 Apple Music"
+                    try musicMonitor.pause()
+                }
                 didPause = true
 
                 // Give Apple Music time to release its old Core Audio stream before
                 // changing the hardware clock. Some USB DACs otherwise stop receiving audio.
-                try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
+                try await Task<Never, Never>.sleep(nanoseconds: 650_000_000)
             }
 
             stage = "写入 DAC 采样率"
@@ -274,6 +294,10 @@ final class AppState: ObservableObject {
                 stage = "恢复 Apple Music"
                 try musicMonitor.play()
                 didPause = false
+                if let resumePosition {
+                    try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
+                    try musicMonitor.setPlayerPosition(resumePosition)
+                }
 
                 // A longer stable window catches devices that briefly report the target
                 // rate and then fall back while Music recreates its output stream.
@@ -296,6 +320,41 @@ final class AppState: ObservableObject {
             statusText = playWhenFinished ? "采样率已匹配，正在播放" : "已预匹配，等待播放"
         } catch {
             scheduleRetry(afterFailureAt: stage, error: error)
+        }
+    }
+
+    private func requiresFullStreamRestart(for device: AudioDevice) -> Bool {
+        device.name.localizedCaseInsensitiveContains("walkman")
+            || device.name.localizedCaseInsensitiveContains("sony")
+    }
+
+    private func rebuildAudioStream() async {
+        var needsResume = false
+        let position = try? musicMonitor.playerPosition()
+        defer {
+            if needsResume {
+                try? musicMonitor.play()
+                if let position { try? musicMonitor.setPlayerPosition(position) }
+            }
+            isSwitching = false
+        }
+
+        do {
+            try musicMonitor.stop()
+            needsResume = true
+            try await Task<Never, Never>.sleep(nanoseconds: 650_000_000)
+            try musicMonitor.play()
+            needsResume = false
+            if let position {
+                try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
+                try musicMonitor.setPlayerPosition(position)
+            }
+            try await Task<Never, Never>.sleep(nanoseconds: 400_000_000)
+            statusText = "音频流已重建，请确认声音"
+            diagnosticText = nil
+        } catch {
+            diagnosticText = "重建音频流：\(error.localizedDescription)"
+            statusText = "恢复声音失败"
         }
     }
 

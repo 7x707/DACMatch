@@ -110,11 +110,19 @@ private struct DACMatchPanel: View {
             .menuStyle(.borderlessButton)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button("立即重新匹配") {
-                state.forceRematch()
+            HStack(spacing: 8) {
+                Button("立即重新匹配") {
+                    state.forceRematch()
+                }
+                .buttonStyle(.bordered)
+                .disabled(state.track == nil)
+
+                Button("恢复声音") {
+                    state.recoverAudio()
+                }
+                .buttonStyle(.bordered)
+                .disabled(state.track == nil)
             }
-            .buttonStyle(.bordered)
-            .disabled(state.track == nil)
 
             Toggle(
                 "登录时启动",

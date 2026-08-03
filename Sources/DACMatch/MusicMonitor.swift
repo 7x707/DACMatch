@@ -126,6 +126,34 @@ struct MusicMonitor {
         try runCommand("tell application \"Music\" to play")
     }
 
+    func stop() throws {
+        try runCommand("tell application \"Music\" to stop")
+    }
+
+    func playerPosition() throws -> Double {
+        guard let appleScript = NSAppleScript(
+            source: "tell application \"Music\" to return player position"
+        ) else {
+            throw MusicMonitorError.scriptFailed("无法创建播放位置脚本")
+        }
+        var error: NSDictionary?
+        let result = appleScript.executeAndReturnError(&error)
+        if let error {
+            let message = error[NSAppleScript.errorMessage] as? String ?? error.description
+            throw MusicMonitorError.scriptFailed(message)
+        }
+        return result.doubleValue
+    }
+
+    func setPlayerPosition(_ position: Double) throws {
+        let value = String(
+            format: "%.3f",
+            locale: Locale(identifier: "en_US_POSIX"),
+            position
+        )
+        try runCommand("tell application \"Music\" to set player position to \(value)")
+    }
+
     private func runCommand(_ source: String) throws {
         guard let appleScript = NSAppleScript(source: source) else {
             throw MusicMonitorError.scriptFailed("无法创建自动化脚本")
