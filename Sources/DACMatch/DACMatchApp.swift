@@ -73,7 +73,7 @@ private struct DACMatchPanel: View {
 
             Toggle("自动匹配采样率", isOn: $state.autoMatchEnabled)
 
-            Menu("输出设备") {
+            Menu("系统输出设备") {
                 if state.devices.isEmpty {
                     Text("没有找到输出设备")
                 }

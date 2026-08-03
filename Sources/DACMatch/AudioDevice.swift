@@ -112,6 +112,26 @@ struct CoreAudioDeviceManager: Sendable {
         )
     }
 
+    func setDefaultOutputDevice(_ deviceID: AudioObjectID) throws {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var newDefault = deviceID
+        try check(
+            AudioObjectSetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                0,
+                nil,
+                UInt32(MemoryLayout<AudioObjectID>.size),
+                &newDefault
+            ),
+            "切换系统输出设备"
+        )
+    }
+
     private var nominalSampleRateAddress: AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyNominalSampleRate,

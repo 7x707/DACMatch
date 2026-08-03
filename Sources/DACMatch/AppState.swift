@@ -48,6 +48,7 @@ final class AppState: ObservableObject {
     private var artworkTrackID: String?
     private var artworkLoadAttempts = 0
     private var nextArtworkLoadDate: Date?
+    private var lastDeviceRefreshDate: Date?
 
     private enum Keys {
         static let autoMatch = "autoMatchEnabled"
@@ -84,9 +85,13 @@ final class AppState: ObservableObject {
     func refreshDevices() {
         do {
             devices = try audioManager.outputDevices()
-            if selectedDevice == nil {
-                selectedDeviceUID = devices.first(where: \.isDefaultOutput)?.uid ?? devices.first?.uid
+            let activeDevice = devices.first(where: \.isDefaultOutput) ?? devices.first
+            if selectedDeviceUID != activeDevice?.uid {
+                selectedDeviceUID = activeDevice?.uid
+                switchAttemptsForTrack = 0
+                nextRetryDate = nil
             }
+            lastDeviceRefreshDate = Date()
             refreshDeviceRate()
         } catch {
             setError(error)
@@ -94,8 +99,17 @@ final class AppState: ObservableObject {
     }
 
     func selectDevice(_ device: AudioDevice) {
-        selectedDeviceUID = device.uid
-        statusText = "已选择 \(device.name)"
+        do {
+            try audioManager.setDefaultOutputDevice(device.id)
+            selectedDeviceUID = device.uid
+            switchAttemptsForTrack = 0
+            nextRetryDate = nil
+            diagnosticText = nil
+            refreshDevices()
+            statusText = "系统输出已切换到 \(device.name)"
+        } catch {
+            setError(error)
+        }
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -152,6 +166,10 @@ final class AppState: ObservableObject {
     private func poll() {
         guard !isSwitching else { return }
         do {
+            if lastDeviceRefreshDate == nil
+                || Date().timeIntervalSince(lastDeviceRefreshDate!) >= 2 {
+                refreshDevices()
+            }
             let snapshot = try musicMonitor.snapshot()
             let newTrack = snapshot.track
             track = newTrack
