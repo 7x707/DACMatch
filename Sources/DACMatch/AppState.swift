@@ -281,13 +281,8 @@ final class AppState: ObservableObject {
         do {
             if musicWasPlaying {
                 resumePosition = try? musicMonitor.playerPosition()
-                if requiresFullStreamRestart(for: device) {
-                    stage = "停止并释放 Apple Music 音频流"
-                    try musicMonitor.stop()
-                } else {
-                    stage = "暂停 Apple Music"
-                    try musicMonitor.pause()
-                }
+                stage = "暂停 Apple Music"
+                try musicMonitor.pause()
                 didPause = true
 
                 // Give Apple Music time to release its old Core Audio stream before
@@ -314,7 +309,9 @@ final class AppState: ObservableObject {
                 didPause = false
                 if let resumePosition {
                     try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
-                    try musicMonitor.setPlayerPosition(resumePosition)
+                    // Seeking nudges Music to refresh the stream, but failure to restore
+                    // an exact position must never invalidate a successful rate switch.
+                    try? musicMonitor.setPlayerPosition(resumePosition)
                 }
 
                 // A longer stable window catches devices that briefly report the target
@@ -341,11 +338,6 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func requiresFullStreamRestart(for device: AudioDevice) -> Bool {
-        device.name.localizedCaseInsensitiveContains("walkman")
-            || device.name.localizedCaseInsensitiveContains("sony")
-    }
-
     private func rebuildAudioStream() async {
         var needsResume = false
         let position = try? musicMonitor.playerPosition()
@@ -358,17 +350,17 @@ final class AppState: ObservableObject {
         }
 
         do {
-            try musicMonitor.stop()
+            try musicMonitor.pause()
             needsResume = true
-            try await Task<Never, Never>.sleep(nanoseconds: 650_000_000)
+            try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
             try musicMonitor.play()
             needsResume = false
             if let position {
                 try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
-                try musicMonitor.setPlayerPosition(position)
+                try? musicMonitor.setPlayerPosition(position)
             }
             try await Task<Never, Never>.sleep(nanoseconds: 400_000_000)
-            statusText = "音频流已重建，请确认声音"
+            statusText = "音频流已刷新，请确认声音"
             diagnosticText = nil
         } catch {
             diagnosticText = "重建音频流：\(error.localizedDescription)"

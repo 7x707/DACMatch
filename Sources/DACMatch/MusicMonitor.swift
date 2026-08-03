@@ -126,10 +126,6 @@ struct MusicMonitor {
         try runCommand("tell application \"Music\" to play")
     }
 
-    func stop() throws {
-        try runCommand("tell application \"Music\" to stop")
-    }
-
     func playerPosition() throws -> Double {
         guard let appleScript = NSAppleScript(
             source: "tell application \"Music\" to return player position"
