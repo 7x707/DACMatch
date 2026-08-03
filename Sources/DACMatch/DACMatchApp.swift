@@ -11,31 +11,51 @@ struct DACMatchApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra(state.menuBarTitle, systemImage: "waveform") {
-            DACMatchMenu(state: state)
+        MenuBarExtra {
+            DACMatchPanel(state: state)
+        } label: {
+            Label(state.menuBarTitle, systemImage: "waveform")
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
     }
 }
 
-private struct DACMatchMenu: View {
+private struct DACMatchPanel: View {
     @ObservedObject var state: AppState
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 12) {
             if let track = state.track {
-                Text(track.name)
-                Text(track.artist.isEmpty ? "未知艺人" : track.artist)
-                Text("源：\(SampleRateFormatter.string(track.sampleRate))")
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(track.name)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(track.artist.isEmpty ? "未知艺人" : track.artist)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             } else {
-                Text("Apple Music 未在播放")
+                Text("Apple Music 未选择曲目")
+                    .font(.headline)
             }
 
-            Text("DAC：\(state.selectedDeviceName)")
-            if let rate = state.deviceSampleRate {
-                Text("输出：\(SampleRateFormatter.string(rate))")
+            VStack(alignment: .leading, spacing: 7) {
+                infoRow(
+                    "源格式",
+                    value: state.track.map { SampleRateFormatter.string($0.sampleRate) } ?? "—"
+                )
+                infoRow("DAC", value: state.selectedDeviceName)
+                infoRow(
+                    "输出格式",
+                    value: state.deviceSampleRate.map(SampleRateFormatter.string) ?? "—"
+                )
             }
-            Text(state.statusText)
+
+            Label(state.statusText, systemImage: statusSymbol)
+                .font(.callout)
+                .foregroundStyle(statusColor)
+                .lineLimit(2)
+                .animation(.default, value: state.statusText)
 
             Divider()
 
@@ -59,6 +79,8 @@ private struct DACMatchMenu: View {
                 Divider()
                 Button("重新扫描") { state.refreshDevices() }
             }
+            .menuStyle(.borderlessButton)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Menu("DAC 锁定等待：\(delayLabel(state.dacLockDelaySeconds))") {
                 ForEach([0.5, 1.0, 2.0, 3.0, 5.0], id: \.self) { seconds in
@@ -73,20 +95,30 @@ private struct DACMatchMenu: View {
                     }
                 }
             }
+            .menuStyle(.borderlessButton)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button("匹配并播放") {
-                state.matchAndPlay()
-            }
-            .disabled(state.track == nil)
+            HStack(spacing: 8) {
+                Button("匹配并播放") {
+                    state.matchAndPlay()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(state.track == nil)
 
-            Button("立即重新匹配") {
-                state.forceRematch()
+                Button("立即重新匹配") {
+                    state.forceRematch()
+                }
+                .buttonStyle(.bordered)
+                .disabled(state.track == nil)
             }
-            .disabled(state.track == nil)
 
-            Button(state.launchAtLogin ? "关闭登录时启动" : "登录时启动") {
-                state.setLaunchAtLogin(!state.launchAtLogin)
-            }
+            Toggle(
+                "登录时启动",
+                isOn: Binding(
+                    get: { state.launchAtLogin },
+                    set: { state.setLaunchAtLogin($0) }
+                )
+            )
 
             Divider()
 
@@ -94,7 +126,43 @@ private struct DACMatchMenu: View {
                 state.stop()
                 NSApplication.shared.terminate(nil)
             }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
+        .padding(16)
+        .frame(width: 340)
+    }
+
+    private func infoRow(_ label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 12)
+            Text(value)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .font(.callout)
+    }
+
+    private var statusSymbol: String {
+        if state.statusText.contains("已匹配") || state.statusText.contains("预匹配") {
+            return "checkmark.circle.fill"
+        }
+        if state.statusText.contains("正在") || state.statusText.contains("准备") {
+            return "arrow.triangle.2.circlepath"
+        }
+        return "exclamationmark.circle"
+    }
+
+    private var statusColor: Color {
+        if state.statusText.contains("已匹配") || state.statusText.contains("预匹配") {
+            return .green
+        }
+        if state.statusText.contains("正在") || state.statusText.contains("准备") {
+            return .secondary
+        }
+        return .orange
     }
 
     private func delayLabel(_ seconds: Double) -> String {
