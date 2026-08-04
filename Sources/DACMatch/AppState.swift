@@ -264,7 +264,7 @@ final class AppState: ObservableObject {
             let currentRate = try audioManager.currentSampleRate(for: device.id)
             if abs(currentRate - newTrack.sampleRate) < 1 {
                 if snapshot.state == .playing,
-                   device.requiresTrackStreamRefresh,
+                   device.requiresRouteReset,
                    lastAppliedTrackID != newTrack.persistentID {
                     if let nextRetryDate, nextRetryDate > Date() {
                         statusText = text(.waitingRetry)
@@ -278,11 +278,7 @@ final class AppState: ObservableObject {
                     switchAttemptsForTrack += 1
                     statusText = text(.refreshingTrackStream)
                     Task { @MainActor [weak self] in
-                        await self?.refreshMatchedTrackStream(
-                            trackID: newTrack.persistentID,
-                            rate: newTrack.sampleRate,
-                            device: device
-                        )
+                        await self?.rebuildAudioStream(automatic: true)
                     }
                     return
                 }
@@ -428,50 +424,6 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func refreshMatchedTrackStream(
-        trackID: String,
-        rate: Double,
-        device: AudioDevice
-    ) async {
-        var needsResume = false
-        defer {
-            if needsResume {
-                try? musicMonitor.play()
-                playbackState = .playing
-            }
-            isSwitching = false
-        }
-
-        do {
-            try musicMonitor.pause()
-            needsResume = true
-            playbackState = .paused
-            statusText = text(.refreshingTrackStream)
-            try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
-
-            deviceSampleRate = try await waitForStableSampleRate(
-                rate,
-                device: device,
-                timeout: max(0.8, dacLockDelaySeconds),
-                stableFor: 0.25
-            )
-
-            try musicMonitor.play()
-            needsResume = false
-            playbackState = .playing
-            try await waitForDeviceToStartRunning(device.id, timeout: 1.5)
-
-            lastAppliedTrackID = trackID
-            switchAttemptsForTrack = 0
-            nextRetryDate = nil
-            diagnosticText = nil
-            playbackState = .playing
-            statusText = text(.matchedPlaying)
-        } catch {
-            scheduleRetry(afterFailureAt: text(.refreshingTrackStream), error: error)
-        }
-    }
-
     private func switchOutputDevice(to device: AudioDevice) async {
         var needsResume = false
         var stage = text(.prepareOutputSwitch)
@@ -567,7 +519,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func rebuildAudioStream() async {
+    private func rebuildAudioStream(automatic: Bool = false) async {
         var needsResume = false
         var targetDevice: AudioDevice?
         var mustRestoreOutputRoute = false
@@ -615,7 +567,23 @@ final class AppState: ObservableObject {
             let targetRate = sourceRate > 0
                 ? sourceRate
                 : try audioManager.currentSampleRate(for: device.id)
-            let currentRate = try audioManager.currentSampleRate(for: device.id)
+            var currentRate = try audioManager.currentSampleRate(for: device.id)
+            if device.requiresRouteReset,
+               abs(currentRate - targetRate) < 1,
+               let relockRate = RateMatcher.relockRate(
+                   for: targetRate,
+                   availableRates: device.availableSampleRates
+               ) {
+                statusText = text(.writeRate)
+                try audioManager.setSampleRate(relockRate, for: device)
+                _ = try await waitForStableSampleRate(
+                    relockRate,
+                    device: device,
+                    timeout: max(1.0, dacLockDelaySeconds) + 0.5,
+                    stableFor: 0.3
+                )
+                currentRate = relockRate
+            }
             if abs(currentRate - targetRate) >= 1 {
                 statusText = text(.writeRate)
                 try audioManager.setSampleRate(targetRate, for: device)
@@ -651,8 +619,12 @@ final class AppState: ObservableObject {
             statusText = text(.streamRefreshed)
             diagnosticText = nil
         } catch {
-            diagnosticText = "重建音频流：\(error.localizedDescription)"
-            statusText = text(.recoveryFailed)
+            if automatic {
+                scheduleRetry(afterFailureAt: text(.rebuildingStream), error: error)
+            } else {
+                diagnosticText = "重建音频流：\(error.localizedDescription)"
+                statusText = text(.recoveryFailed)
+            }
         }
     }
 

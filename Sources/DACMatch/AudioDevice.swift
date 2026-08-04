@@ -282,6 +282,12 @@ enum RateMatcher {
         let fixedRates = ranges.filter { $0.mMinimum == $0.mMaximum }.map(\.mMinimum)
         return Array(Set(rates + fixedRates)).sorted()
     }
+
+    static func relockRate(for targetRate: Double, availableRates: [Double]) -> Double? {
+        availableRates
+            .filter { abs($0 - targetRate) >= 1 }
+            .min { abs($0 - targetRate) < abs($1 - targetRate) }
+    }
 }
 
 enum SampleRateFormatter {

@@ -23,6 +23,16 @@ import Testing
     #expect(SampleRateFormatter.string(96_000) == "96 kHz")
 }
 
+@Test func relockRateChoosesNearestDifferentClock() {
+    #expect(
+        RateMatcher.relockRate(
+            for: 48_000,
+            availableRates: [44_100, 48_000, 96_000]
+        ) == 44_100
+    )
+    #expect(RateMatcher.relockRate(for: 48_000, availableRates: [48_000]) == nil)
+}
+
 @Test func pausedMusicSnapshotKeepsCurrentTrack() throws {
     let separator = String(UnicodeScalar(30))
     let value = ["paused", "TRACK-1", "Example", "Artist", "96000"]
