@@ -13,6 +13,14 @@ final class AppState: ObservableObject {
     @Published private(set) var deviceSampleRate: Double?
     @Published private(set) var statusText = "正在启动…"
     @Published private(set) var diagnosticText: String?
+    @Published var language: AppLanguage {
+        didSet {
+            defaults.set(language.rawValue, forKey: Keys.language)
+            diagnosticText = nil
+            statusText = text(.starting)
+            poll()
+        }
+    }
     @Published var autoMatchEnabled: Bool {
         didSet { defaults.set(autoMatchEnabled, forKey: Keys.autoMatch) }
     }
@@ -31,7 +39,7 @@ final class AppState: ObservableObject {
             switchAttemptsForTrack = 0
             nextRetryDate = nil
             diagnosticText = nil
-            statusText = "等待时间已更新，准备重新匹配"
+            statusText = text(.waitUpdated)
         }
     }
 
@@ -55,10 +63,13 @@ final class AppState: ObservableObject {
         static let autoMatch = "autoMatchEnabled"
         static let deviceUID = "selectedDeviceUID"
         static let dacLockDelay = "dacLockDelaySeconds"
+        static let language = "appLanguage"
     }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        language = AppLanguage(rawValue: defaults.string(forKey: Keys.language) ?? "")
+            ?? .simplifiedChinese
         if defaults.object(forKey: Keys.autoMatch) == nil {
             autoMatchEnabled = true
         } else {
@@ -67,6 +78,7 @@ final class AppState: ObservableObject {
         selectedDeviceUID = defaults.string(forKey: Keys.deviceUID)
         dacLockDelaySeconds = defaults.object(forKey: Keys.dacLockDelay) as? Double ?? 2.0
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        statusText = AppCopy.text(.starting, language: language)
     }
 
     func start() {
@@ -102,7 +114,7 @@ final class AppState: ObservableObject {
     func selectDevice(_ device: AudioDevice) {
         guard !isSwitching else { return }
         isSwitching = true
-        statusText = "正在安全切换到 \(device.name)…"
+        statusText = text(.switchingTo, device.name)
         diagnosticText = nil
         Task { @MainActor [weak self] in
             await self?.switchOutputDevice(to: device)
@@ -128,14 +140,14 @@ final class AppState: ObservableObject {
         switchAttemptsForTrack = 0
         nextRetryDate = nil
         diagnosticText = nil
-        statusText = "正在重新匹配…"
+        statusText = text(.rematching)
         poll()
     }
 
     func recoverAudio() {
         guard !isSwitching, track != nil else { return }
         isSwitching = true
-        statusText = "正在重建 Apple Music 音频流…"
+        statusText = text(.rebuildingStream)
         diagnosticText = nil
         Task { @MainActor [weak self] in
             await self?.rebuildAudioStream()
@@ -147,7 +159,7 @@ final class AppState: ObservableObject {
     }
 
     var selectedDeviceName: String {
-        selectedDevice?.name ?? "未选择 DAC"
+        selectedDevice?.name ?? text(.noDAC)
     }
 
     var menuBarTitle: String {
@@ -158,6 +170,10 @@ final class AppState: ObservableObject {
             return source == output ? source : "\(source)→\(output)"
         }
         return source
+    }
+
+    func text(_ key: CopyKey, _ arguments: CVarArg...) -> String {
+        AppCopy.text(key, language: language, arguments: arguments)
     }
 
     private func poll() {
@@ -174,7 +190,7 @@ final class AppState: ObservableObject {
             consecutiveErrorKey = nil
 
             guard let newTrack else {
-                statusText = "请在 Apple Music 中选择一首歌曲"
+                statusText = text(.selectSong)
                 lastAppliedTrackID = nil
                 observedTrackID = nil
                 switchAttemptsForTrack = 0
@@ -198,16 +214,16 @@ final class AppState: ObservableObject {
             }
             loadArtworkIfNeeded(for: newTrack)
             guard newTrack.sampleRate > 0 else {
-                statusText = "当前曲目没有可用的采样率信息"
+                statusText = text(.noRate)
                 return
             }
             guard autoMatchEnabled else {
-                statusText = "自动匹配已暂停"
+                statusText = text(.autoPaused)
                 refreshDeviceRate()
                 return
             }
             guard let device = selectedDevice else {
-                statusText = "请选择输出 DAC"
+                statusText = text(.selectDAC)
                 return
             }
 
@@ -218,25 +234,25 @@ final class AppState: ObservableObject {
                 nextRetryDate = nil
                 diagnosticText = nil
                 statusText = snapshot.state == .playing
-                    ? "采样率已匹配"
-                    : "已预匹配，等待播放"
+                    ? text(.matched)
+                    : text(.prematched)
                 return
             }
 
             deviceSampleRate = currentRate
             lastAppliedTrackID = nil
             if let nextRetryDate, nextRetryDate > Date() {
-                statusText = "等待自动重试…"
+                statusText = text(.waitingRetry)
                 return
             }
             guard switchAttemptsForTrack < maximumSwitchAttempts else {
-                statusText = "输出仍不匹配，请点“立即重新匹配”"
+                statusText = text(.outputMismatch)
                 return
             }
 
             isSwitching = true
             switchAttemptsForTrack += 1
-            statusText = "正在安全切换采样率…"
+            statusText = text(.safeRateSwitch)
             Task { @MainActor [weak self] in
                 await self?.switchSampleRate(
                     to: newTrack.sampleRate,
@@ -260,7 +276,7 @@ final class AppState: ObservableObject {
     ) async {
         var didPause = false
         var resumePosition: Double?
-        var stage = "准备切换"
+        var stage = text(.preparingSwitch)
         defer {
             if didPause {
                 do {
@@ -278,7 +294,7 @@ final class AppState: ObservableObject {
         do {
             if musicWasPlaying {
                 resumePosition = try? musicMonitor.playerPosition()
-                stage = "暂停 Apple Music"
+                stage = text(.pauseMusic)
                 try musicMonitor.pause()
                 didPause = true
 
@@ -287,12 +303,12 @@ final class AppState: ObservableObject {
                 try await Task<Never, Never>.sleep(nanoseconds: 650_000_000)
             }
 
-            stage = "写入 DAC 采样率"
+            stage = text(.writeRate)
             try audioManager.setSampleRate(rate, for: device)
 
             // Observe until the new rate stays stable instead of trusting one instant read.
             // The selected lock delay is a maximum wait, not a mandatory fixed pause.
-            stage = "等待 DAC 稳定锁定"
+            stage = text(.waitDAC)
             let confirmedRate = try await waitForStableSampleRate(
                 rate,
                 device: device,
@@ -301,7 +317,7 @@ final class AppState: ObservableObject {
             )
 
             if playWhenFinished {
-                stage = "恢复 Apple Music"
+                stage = text(.resumeMusic)
                 try musicMonitor.play()
                 didPause = false
                 if let resumePosition {
@@ -313,7 +329,7 @@ final class AppState: ObservableObject {
 
                 // A longer stable window catches devices that briefly report the target
                 // rate and then fall back while Music recreates its output stream.
-                stage = "验证恢复后的输出"
+                stage = text(.verifyOutput)
                 let postResumeRate = try await waitForStableSampleRate(
                     rate,
                     device: device,
@@ -329,7 +345,7 @@ final class AppState: ObservableObject {
             lastAppliedTrackID = trackID
             nextRetryDate = nil
             diagnosticText = nil
-            statusText = playWhenFinished ? "采样率已匹配，正在播放" : "已预匹配，等待播放"
+            statusText = playWhenFinished ? text(.matchedPlaying) : text(.prematched)
         } catch {
             scheduleRetry(afterFailureAt: stage, error: error)
         }
@@ -338,7 +354,7 @@ final class AppState: ObservableObject {
     private func switchOutputDevice(to device: AudioDevice) async {
         var needsResume = false
         var resumePosition: Double?
-        var stage = "准备切换输出设备"
+        var stage = text(.prepareOutputSwitch)
 
         defer {
             if needsResume {
@@ -355,7 +371,7 @@ final class AppState: ObservableObject {
 
             if wasPlaying {
                 resumePosition = try? musicMonitor.playerPosition()
-                stage = "暂停 Apple Music"
+                stage = text(.pauseMusic)
                 try musicMonitor.pause()
                 needsResume = true
 
@@ -363,10 +379,10 @@ final class AppState: ObservableObject {
                 try await Task<Never, Never>.sleep(nanoseconds: 650_000_000)
             }
 
-            stage = "切换系统输出设备"
+            stage = text(.switchSystemOutput)
             try audioManager.setDefaultOutputDevice(device.id)
 
-            stage = "确认系统输出设备"
+            stage = text(.confirmSystemOutput)
             try await waitForDefaultOutputDevice(device.id, timeout: 2.0)
             selectedDeviceUID = device.uid
 
@@ -374,13 +390,13 @@ final class AppState: ObservableObject {
             try await Task<Never, Never>.sleep(nanoseconds: 350_000_000)
 
             if let currentTrack, currentTrack.sampleRate > 0 {
-                stage = "写入新设备采样率"
+                stage = text(.writeNewRate)
                 let currentRate = try audioManager.currentSampleRate(for: device.id)
                 if abs(currentRate - currentTrack.sampleRate) >= 1 {
                     try audioManager.setSampleRate(currentTrack.sampleRate, for: device)
                 }
 
-                stage = "等待新设备稳定锁定"
+                stage = text(.waitNewStable)
                 deviceSampleRate = try await waitForStableSampleRate(
                     currentTrack.sampleRate,
                     device: device,
@@ -394,7 +410,7 @@ final class AppState: ObservableObject {
             }
 
             if wasPlaying {
-                stage = "在新设备上恢复 Apple Music"
+                stage = text(.resumeOnNew)
                 try musicMonitor.play()
                 needsResume = false
                 if let resumePosition {
@@ -402,13 +418,13 @@ final class AppState: ObservableObject {
                     try? musicMonitor.setPlayerPosition(resumePosition)
                 }
 
-                stage = "确认新设备音频流"
+                stage = text(.confirmNewStream)
                 do {
                     try await waitForDeviceToStartRunning(device.id, timeout: 1.2)
                 } catch {
                     // The route and clock can look correct while Music still owns a
                     // stale stream. Reopen it once before reporting success.
-                    stage = "重新建立新设备音频流"
+                    stage = text(.rebuildNewStream)
                     try musicMonitor.pause()
                     needsResume = true
                     try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
@@ -426,12 +442,12 @@ final class AppState: ObservableObject {
             nextRetryDate = nil
             diagnosticText = nil
             statusText = wasPlaying
-                ? "已切换到 \(device.name)，正在播放"
-                : "系统输出已切换到 \(device.name)"
+                ? text(.switchedPlaying, device.name)
+                : text(.systemSwitched, device.name)
             refreshDevices()
         } catch {
             diagnosticText = "\(stage)：\(error.localizedDescription)"
-            statusText = "切换到 \(device.name) 失败"
+            statusText = text(.switchFailed, device.name)
         }
     }
 
@@ -457,11 +473,11 @@ final class AppState: ObservableObject {
                 try? musicMonitor.setPlayerPosition(position)
             }
             try await Task<Never, Never>.sleep(nanoseconds: 400_000_000)
-            statusText = "音频流已刷新，请确认声音"
+            statusText = text(.streamRefreshed)
             diagnosticText = nil
         } catch {
             diagnosticText = "重建音频流：\(error.localizedDescription)"
-            statusText = "恢复声音失败"
+            statusText = text(.recoveryFailed)
         }
     }
 
@@ -490,7 +506,11 @@ final class AppState: ObservableObject {
         }
 
         throw CoreAudioError.propertyUnavailable(
-            "等待 \(SampleRateFormatter.string(targetRate)) 超时，最后检测到 \(SampleRateFormatter.string(lastObservedRate))"
+            text(
+                .waitRateTimeout,
+                SampleRateFormatter.string(targetRate),
+                SampleRateFormatter.string(lastObservedRate)
+            )
         )
     }
 
@@ -505,7 +525,7 @@ final class AppState: ObservableObject {
             }
             try await Task<Never, Never>.sleep(nanoseconds: 100_000_000)
         }
-        throw CoreAudioError.propertyUnavailable("系统没有确认新的默认输出设备")
+        throw CoreAudioError.propertyUnavailable(text(.defaultNotConfirmed))
     }
 
     private func waitForDeviceToStartRunning(
@@ -519,21 +539,21 @@ final class AppState: ObservableObject {
             }
             try await Task<Never, Never>.sleep(nanoseconds: 100_000_000)
         }
-        throw CoreAudioError.propertyUnavailable("新输出设备没有检测到音频流")
+        throw CoreAudioError.propertyUnavailable(text(.streamNotDetected))
     }
 
     private func scheduleRetry(afterFailureAt stage: String, error: Error) {
         diagnosticText = "\(stage)：\(error.localizedDescription)"
         guard switchAttemptsForTrack < maximumSwitchAttempts else {
             nextRetryDate = nil
-            statusText = "自动重试已暂停，请手动重新匹配"
+            statusText = text(.retryPaused)
             return
         }
 
         let attemptIndex = Double(max(0, switchAttemptsForTrack - 1))
         let delay = min(pow(2.0, attemptIndex) * 0.5, 3.0)
         nextRetryDate = Date().addingTimeInterval(delay)
-        statusText = String(format: "匹配未稳定，%.1f 秒后重试", delay)
+        statusText = text(.retryAfter, delay)
     }
 
     private func refreshDeviceRate() {

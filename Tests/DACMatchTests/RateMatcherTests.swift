@@ -39,3 +39,26 @@ import Testing
     #expect(snapshot.state == .stopped)
     #expect(snapshot.track == nil)
 }
+
+@Test func interfaceCopySupportsAllLanguages() {
+    #expect(AppCopy.text(.rematch, language: .simplifiedChinese) == "重新匹配")
+    #expect(AppCopy.text(.rematch, language: .traditionalChinese) == "重新匹配")
+    #expect(AppCopy.text(.rematch, language: .english) == "Rematch")
+}
+
+@Test func localizedCopyFormatsValues() {
+    #expect(
+        AppCopy.text(
+            .switchingTo,
+            language: .english,
+            arguments: ["WALKMAN"]
+        ) == "Switching safely to WALKMAN…"
+    )
+    #expect(
+        AppCopy.text(
+            .secondsDecimal,
+            language: .traditionalChinese,
+            arguments: [0.5]
+        ) == "0.5 秒"
+    )
+}

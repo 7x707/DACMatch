@@ -44,7 +44,7 @@ private struct DACMatchPanel: View {
                 Button {
                     state.forceRematch()
                 } label: {
-                    Label("重新匹配", systemImage: "arrow.triangle.2.circlepath")
+                    Label(state.text(.rematch), systemImage: "arrow.triangle.2.circlepath")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -54,7 +54,7 @@ private struct DACMatchPanel: View {
                 Button {
                     state.recoverAudio()
                 } label: {
-                    Label("恢复声音", systemImage: "speaker.wave.2")
+                    Label(state.text(.recoverSound), systemImage: "speaker.wave.2")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -67,7 +67,7 @@ private struct DACMatchPanel: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 Spacer()
-                Button("退出") {
+                Button(state.text(.quit)) {
                     state.stop()
                     NSApplication.shared.terminate(nil)
                 }
@@ -86,11 +86,14 @@ private struct DACMatchPanel: View {
             artworkView
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(state.track?.name ?? "未选择曲目")
+                Text(state.track?.name ?? state.text(.noTrack))
                     .font(.system(size: 17, weight: .semibold))
                     .lineLimit(2)
 
-                Text(state.track.map { $0.artist.isEmpty ? "未知艺人" : $0.artist } ?? "请在 Apple Music 中开始播放")
+                Text(
+                    state.track.map { $0.artist.isEmpty ? state.text(.unknownArtist) : $0.artist }
+                        ?? state.text(.startAppleMusic)
+                )
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -150,8 +153,8 @@ private struct DACMatchPanel: View {
             Toggle(isOn: $state.autoMatchEnabled) {
                 settingLabel(
                     icon: "waveform.badge.checkmark",
-                    title: "自动匹配采样率",
-                    value: state.autoMatchEnabled ? "已开启" : "已关闭"
+                    title: state.text(.autoMatch),
+                    value: state.autoMatchEnabled ? state.text(.enabled) : state.text(.disabled)
                 )
             }
             .toggleStyle(.switch)
@@ -160,25 +163,25 @@ private struct DACMatchPanel: View {
             insetDivider
 
             HStack(spacing: 11) {
-                settingTitle(icon: "hifispeaker", title: "输出设备")
+                settingTitle(icon: "hifispeaker", title: state.text(.outputDevice))
                 Spacer(minLength: 10)
                 Menu {
                     if state.devices.isEmpty {
-                        Text("没有找到输出设备")
+                        Text(state.text(.noDevices))
                     }
                     ForEach(state.devices) { device in
                         Button {
                             state.selectDevice(device)
                         } label: {
                             if device.uid == state.selectedDeviceUID {
-                                Label(device.displayName, systemImage: "checkmark")
+                                Label(deviceMenuName(device), systemImage: "checkmark")
                             } else {
-                                Text(device.displayName)
+                                Text(deviceMenuName(device))
                             }
                         }
                     }
                     Divider()
-                    Button("重新扫描") { state.refreshDevices() }
+                    Button(state.text(.rescan)) { state.refreshDevices() }
                 } label: {
                     menuValueLabel(state.selectedDeviceName)
                 }
@@ -191,7 +194,7 @@ private struct DACMatchPanel: View {
             insetDivider
 
             HStack(spacing: 11) {
-                settingTitle(icon: "timer", title: "DAC 锁定等待")
+                settingTitle(icon: "timer", title: state.text(.lockWait))
                 Spacer(minLength: 10)
                 Menu {
                     ForEach([0.5, 1.0, 2.0, 3.0, 5.0], id: \.self) { seconds in
@@ -216,6 +219,32 @@ private struct DACMatchPanel: View {
 
             insetDivider
 
+            HStack(spacing: 11) {
+                settingTitle(icon: "globe", title: state.text(.language))
+                Spacer(minLength: 10)
+                Menu {
+                    ForEach(AppLanguage.allCases) { language in
+                        Button {
+                            state.language = language
+                        } label: {
+                            if language == state.language {
+                                Label(language.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(language.displayName)
+                            }
+                        }
+                    }
+                } label: {
+                    menuValueLabel(state.language.displayName)
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+            }
+            .padding(12)
+
+            insetDivider
+
             Toggle(
                 isOn: Binding(
                     get: { state.launchAtLogin },
@@ -224,8 +253,8 @@ private struct DACMatchPanel: View {
             ) {
                 settingLabel(
                     icon: "power",
-                    title: "登录时启动",
-                    value: state.launchAtLogin ? "已开启" : "已关闭"
+                    title: state.text(.launchAtLogin),
+                    value: state.launchAtLogin ? state.text(.enabled) : state.text(.disabled)
                 )
             }
             .toggleStyle(.switch)
@@ -364,22 +393,18 @@ private struct DACMatchPanel: View {
     }
 
     private var isSuccessStatus: Bool {
-        ["已匹配", "预匹配", "已切换", "已刷新"].contains {
-            state.statusText.contains($0)
-        }
+        AppCopy.isSuccessStatus(state.statusText)
     }
 
     private var isProgressStatus: Bool {
-        ["正在", "准备", "等待自动重试", "后重试"].contains {
-            state.statusText.contains($0)
-        }
+        AppCopy.isProgressStatus(state.statusText)
     }
 
     private var playbackLabel: String {
         switch state.playbackState {
-        case .playing: return "正在播放"
-        case .paused: return "已暂停"
-        case .stopped: return "Apple Music"
+        case .playing: return state.text(.playing)
+        case .paused: return state.text(.paused)
+        case .stopped: return state.text(.appleMusic)
         }
     }
 
@@ -406,7 +431,11 @@ private struct DACMatchPanel: View {
 
     private func delayLabel(_ seconds: Double) -> String {
         seconds.rounded() == seconds
-            ? "\(Int(seconds)) 秒"
-            : String(format: "%.1f 秒", seconds)
+            ? state.text(.secondsInteger, Int(seconds))
+            : state.text(.secondsDecimal, seconds)
+    }
+
+    private func deviceMenuName(_ device: AudioDevice) -> String {
+        device.isDefaultOutput ? device.name + state.text(.currentDefault) : device.name
     }
 }
