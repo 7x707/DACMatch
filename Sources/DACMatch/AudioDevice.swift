@@ -148,6 +148,25 @@ struct CoreAudioDeviceManager: Sendable {
             ),
             "切换系统输出设备"
         )
+
+        // macOS Sound settings updates both selectors. Mirroring that behavior
+        // makes the programmatic handoff indistinguishable from a user selecting
+        // another output in Control Centre, including for apps watching the system
+        // output route rather than only the regular default output route.
+        var systemAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultSystemOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var newSystemDefault = deviceID
+        _ = AudioObjectSetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &systemAddress,
+            0,
+            nil,
+            UInt32(MemoryLayout<AudioObjectID>.size),
+            &newSystemDefault
+        )
     }
 
     func currentDefaultOutputDeviceID() throws -> AudioObjectID {

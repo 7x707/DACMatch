@@ -402,13 +402,12 @@ final class AppState: ObservableObject {
                 try await waitForDefaultOutputDevice(fallback.id, timeout: 2.0)
                 actualOutputDeviceUID = fallback.uid
                 try await waitForDeviceToStartRunning(fallback.id, timeout: 2.0)
-                try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
-
-                stage = updateStage(.pauseMusic)
-                try musicMonitor.pause()
-                didPause = true
-                playbackState = .paused
-                try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
+                resumedOnFallback = true
+                // Keep the exact same running Music stream on the fallback. This is
+                // deliberately longer than a property acknowledgement: the manual
+                // speaker -> WALKMAN workaround succeeds because Music has time to
+                // migrate its live render pipeline before the DAC route returns.
+                try await Task<Never, Never>.sleep(nanoseconds: 1_000_000_000)
             } else {
                 if musicWasPlaying {
                     stage = updateStage(.pauseMusic)
@@ -450,25 +449,13 @@ final class AppState: ObservableObject {
             }
 
             if mustRestoreOutputRoute {
-                if playWhenFinished, let fallback {
-                    // Start a muted stream on the fallback first, then move that live
-                    // stream to the DAC. This reproduces the manual output-device
-                    // switch that reliably wakes the WALKMAN after a clock change.
-                    stage = updateStage(.resumeMusic)
-                    try musicMonitor.play()
-                    didPause = false
-                    resumedOnFallback = true
-                    playbackState = .playing
-                    try await waitForDeviceToStartRunning(fallback.id, timeout: 2.0)
-                    try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
-                }
-
                 stage = updateStage(.routeBack)
                 try audioManager.setDefaultOutputDevice(device.id)
                 try await waitForDefaultOutputDevice(device.id, timeout: 2.0)
                 actualOutputDeviceUID = device.uid
                 mustRestoreOutputRoute = false
                 if resumedOnFallback {
+                    try await Task<Never, Never>.sleep(nanoseconds: 1_000_000_000)
                     try await waitForDeviceToStartRunning(device.id, timeout: 2.5)
                 } else {
                     try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
@@ -658,13 +645,8 @@ final class AppState: ObservableObject {
                 try await waitForDefaultOutputDevice(fallback.id, timeout: 2.0)
                 actualOutputDeviceUID = fallback.uid
                 try await waitForDeviceToStartRunning(fallback.id, timeout: 2.0)
-                try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
-
-                statusText = text(.pauseMusic)
-                try musicMonitor.pause()
-                needsResume = true
-                playbackState = .paused
-                try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
+                resumedOnFallback = true
+                try await Task<Never, Never>.sleep(nanoseconds: 1_000_000_000)
             } else {
                 if wasPlaying {
                     statusText = text(.pauseMusic)
@@ -725,22 +707,13 @@ final class AppState: ObservableObject {
             }
 
             if mustRestoreOutputRoute {
-                if wasPlaying, let fallback {
-                    statusText = text(.resumeMusic)
-                    try musicMonitor.play()
-                    needsResume = false
-                    resumedOnFallback = true
-                    playbackState = .playing
-                    try await waitForDeviceToStartRunning(fallback.id, timeout: 2.0)
-                    try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
-                }
-
                 statusText = text(.routeBack)
                 try audioManager.setDefaultOutputDevice(device.id)
                 try await waitForDefaultOutputDevice(device.id, timeout: 2.0)
                 actualOutputDeviceUID = device.uid
                 mustRestoreOutputRoute = false
                 if resumedOnFallback {
+                    try await Task<Never, Never>.sleep(nanoseconds: 1_000_000_000)
                     try await waitForDeviceToStartRunning(device.id, timeout: 2.5)
                 } else {
                     try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
