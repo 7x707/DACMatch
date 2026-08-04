@@ -140,6 +140,12 @@ final class AppState: ObservableObject {
     }
 
     func forceRematch() {
+        if (actualOutputDevice ?? selectedDevice)?.requiresRouteReset == true,
+           track != nil,
+           !isSwitching {
+            recoverAudio()
+            return
+        }
         lastAppliedTrackID = nil
         switchAttemptsForTrack = 0
         nextRetryDate = nil
@@ -327,8 +333,13 @@ final class AppState: ObservableObject {
         playWhenFinished: Bool
     ) async {
         var didPause = false
+        var mustRestoreOutputRoute = false
         var stage = text(.preparingSwitch)
         defer {
+            if mustRestoreOutputRoute {
+                try? audioManager.setDefaultOutputDevice(device.id)
+                actualOutputDeviceUID = device.uid
+            }
             if didPause {
                 do {
                     try musicMonitor.play()
@@ -352,6 +363,18 @@ final class AppState: ObservableObject {
                 try await Task<Never, Never>.sleep(nanoseconds: 650_000_000)
             }
 
+            if device.requiresRouteReset {
+                guard let fallback = fallbackOutputDevice(excluding: device) else {
+                    throw CoreAudioError.propertyUnavailable(text(.noFallbackOutput))
+                }
+                stage = updateStage(.routeAway)
+                try audioManager.setDefaultOutputDevice(fallback.id)
+                mustRestoreOutputRoute = true
+                try await waitForDefaultOutputDevice(fallback.id, timeout: 2.0)
+                actualOutputDeviceUID = fallback.uid
+                try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
+            }
+
             stage = updateStage(.writeRate)
             try audioManager.setSampleRate(rate, for: device)
 
@@ -365,25 +388,20 @@ final class AppState: ObservableObject {
                 stableFor: 0.25
             )
 
+            if mustRestoreOutputRoute {
+                stage = updateStage(.routeBack)
+                try audioManager.setDefaultOutputDevice(device.id)
+                try await waitForDefaultOutputDevice(device.id, timeout: 2.0)
+                actualOutputDeviceUID = device.uid
+                mustRestoreOutputRoute = false
+                try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
+            }
+
             if playWhenFinished {
                 stage = updateStage(.resumeMusic)
                 try musicMonitor.play()
                 didPause = false
                 playbackState = .playing
-
-                if device.requiresTrackStreamRefresh {
-                    // WALKMAN can accept the new clock while retaining a silent stream.
-                    // Open the stream once, then reopen it against the settled clock.
-                    try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
-                    try musicMonitor.pause()
-                    didPause = true
-                    playbackState = .paused
-                    statusText = text(.refreshingTrackStream)
-                    try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
-                    try musicMonitor.play()
-                    didPause = false
-                    playbackState = .playing
-                }
 
                 // A longer stable window catches devices that briefly report the target
                 // rate and then fall back while Music recreates its output stream.
@@ -551,7 +569,13 @@ final class AppState: ObservableObject {
 
     private func rebuildAudioStream() async {
         var needsResume = false
+        var targetDevice: AudioDevice?
+        var mustRestoreOutputRoute = false
         defer {
+            if mustRestoreOutputRoute, let targetDevice {
+                try? audioManager.setDefaultOutputDevice(targetDevice.id)
+                actualOutputDeviceUID = targetDevice.uid
+            }
             if needsResume {
                 try? musicMonitor.play()
                 playbackState = .playing
@@ -560,20 +584,81 @@ final class AppState: ObservableObject {
         }
 
         do {
-            try musicMonitor.pause()
-            needsResume = true
-            playbackState = .paused
-            try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
-            try musicMonitor.play()
-            needsResume = false
-            playbackState = .playing
-            try await Task<Never, Never>.sleep(nanoseconds: 400_000_000)
+            guard let device = actualOutputDevice ?? selectedDevice else {
+                throw CoreAudioError.propertyUnavailable(text(.selectDAC))
+            }
+            targetDevice = device
+            let snapshot = try musicMonitor.snapshot()
+            let wasPlaying = snapshot.state == .playing || playbackState == .playing
+
+            if wasPlaying {
+                statusText = text(.pauseMusic)
+                try musicMonitor.pause()
+                needsResume = true
+                playbackState = .paused
+                try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
+            }
+
+            if device.requiresRouteReset {
+                guard let fallback = fallbackOutputDevice(excluding: device) else {
+                    throw CoreAudioError.propertyUnavailable(text(.noFallbackOutput))
+                }
+                statusText = text(.routeAway)
+                try audioManager.setDefaultOutputDevice(fallback.id)
+                mustRestoreOutputRoute = true
+                try await waitForDefaultOutputDevice(fallback.id, timeout: 2.0)
+                actualOutputDeviceUID = fallback.uid
+                try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
+            }
+
+            let sourceRate = track?.sampleRate ?? 0
+            let targetRate = sourceRate > 0
+                ? sourceRate
+                : try audioManager.currentSampleRate(for: device.id)
+            let currentRate = try audioManager.currentSampleRate(for: device.id)
+            if abs(currentRate - targetRate) >= 1 {
+                statusText = text(.writeRate)
+                try audioManager.setSampleRate(targetRate, for: device)
+            }
+            statusText = text(.waitDAC)
+            deviceSampleRate = try await waitForStableSampleRate(
+                targetRate,
+                device: device,
+                timeout: max(1.0, dacLockDelaySeconds) + 0.5,
+                stableFor: 0.4
+            )
+
+            if mustRestoreOutputRoute {
+                statusText = text(.routeBack)
+                try audioManager.setDefaultOutputDevice(device.id)
+                try await waitForDefaultOutputDevice(device.id, timeout: 2.0)
+                actualOutputDeviceUID = device.uid
+                mustRestoreOutputRoute = false
+                try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
+            }
+
+            if wasPlaying {
+                statusText = text(.resumeMusic)
+                try musicMonitor.play()
+                needsResume = false
+                playbackState = .playing
+                try await waitForDeviceToStartRunning(device.id, timeout: 1.5)
+            }
+
+            lastAppliedTrackID = track?.persistentID
+            switchAttemptsForTrack = 0
+            nextRetryDate = nil
             statusText = text(.streamRefreshed)
             diagnosticText = nil
         } catch {
             diagnosticText = "重建音频流：\(error.localizedDescription)"
             statusText = text(.recoveryFailed)
         }
+    }
+
+    private func fallbackOutputDevice(excluding target: AudioDevice) -> AudioDevice? {
+        let alternatives = devices.filter { $0.id != target.id }
+        return alternatives.first(where: { !$0.requiresRouteReset }) ?? alternatives.first
     }
 
     private func waitForStableSampleRate(

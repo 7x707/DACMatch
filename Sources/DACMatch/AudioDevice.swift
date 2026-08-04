@@ -5,6 +5,7 @@ struct AudioDevice: Identifiable, Hashable, Sendable {
     let id: AudioObjectID
     let uid: String
     let name: String
+    let transportType: UInt32
     let availableSampleRates: [Double]
     let isDefaultOutput: Bool
 
@@ -15,6 +16,10 @@ struct AudioDevice: Identifiable, Hashable, Sendable {
     var requiresTrackStreamRefresh: Bool {
         name.localizedCaseInsensitiveContains("walkman")
             || uid.localizedCaseInsensitiveContains("walkman")
+    }
+
+    var requiresRouteReset: Bool {
+        transportType != kAudioDeviceTransportTypeBuiltIn
     }
 }
 
@@ -67,6 +72,7 @@ struct CoreAudioDeviceManager: Sendable {
                 id: id,
                 uid: uid,
                 name: name,
+                transportType: (try? uint32Property(id, kAudioDevicePropertyTransportType)) ?? 0,
                 availableSampleRates: (try? availableSampleRates(for: id)) ?? [],
                 isDefaultOutput: id == defaultID
             )
@@ -211,6 +217,24 @@ struct CoreAudioDeviceManager: Sendable {
             "读取设备名称"
         )
         return value as String
+    }
+
+    private func uint32Property(
+        _ deviceID: AudioObjectID,
+        _ selector: AudioObjectPropertySelector
+    ) throws -> UInt32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        try check(
+            AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &value),
+            "读取设备连接类型"
+        )
+        return value
     }
 
     private func availableSampleRates(for deviceID: AudioObjectID) throws -> [Double] {

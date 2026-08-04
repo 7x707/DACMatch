@@ -85,6 +85,7 @@ import Testing
         id: 1,
         uid: "sony-walkman",
         name: "WALKMAN",
+        transportType: kAudioDeviceTransportTypeUSB,
         availableSampleRates: [44_100, 48_000],
         isDefaultOutput: true
     )
@@ -92,10 +93,13 @@ import Testing
         id: 2,
         uid: "built-in-output",
         name: "Mac mini Speakers",
+        transportType: kAudioDeviceTransportTypeBuiltIn,
         availableSampleRates: [44_100, 48_000],
         isDefaultOutput: false
     )
 
     #expect(walkman.requiresTrackStreamRefresh)
+    #expect(walkman.requiresRouteReset)
     #expect(!speakers.requiresTrackStreamRefresh)
+    #expect(!speakers.requiresRouteReset)
 }
