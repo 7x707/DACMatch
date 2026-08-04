@@ -21,6 +21,7 @@ import Testing
 @Test func sampleRateFormatting() {
     #expect(SampleRateFormatter.string(44_100) == "44.1 kHz")
     #expect(SampleRateFormatter.string(96_000) == "96 kHz")
+    #expect(SampleRateFormatter.compactString(48_000) == "48kHz")
 }
 
 @Test func relockRateChoosesNearestDifferentClock() {

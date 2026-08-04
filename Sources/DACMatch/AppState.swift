@@ -180,9 +180,9 @@ final class AppState: ObservableObject {
 
     var menuBarTitle: String {
         guard let track, track.sampleRate > 0 else { return "DAC" }
-        let source = SampleRateFormatter.string(track.sampleRate).replacingOccurrences(of: " kHz", with: "k")
+        let source = SampleRateFormatter.compactString(track.sampleRate)
         if let deviceSampleRate {
-            let output = SampleRateFormatter.string(deviceSampleRate).replacingOccurrences(of: " kHz", with: "k")
+            let output = SampleRateFormatter.compactString(deviceSampleRate)
             return source == output ? source : "\(source)→\(output)"
         }
         return source

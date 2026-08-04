@@ -317,4 +317,8 @@ enum SampleRateFormatter {
         }
         return "\(Int(rate)) Hz"
     }
+
+    static func compactString(_ rate: Double) -> String {
+        string(rate).replacingOccurrences(of: " kHz", with: "kHz")
+    }
 }
