@@ -241,7 +241,7 @@ final class AppState: ObservableObject {
             loadArtworkIfNeeded(for: newTrack)
             guard newTrack.sampleRate > 0 else {
                 missingRatePollCount += 1
-                statusText = missingRatePollCount < 5 ? text(.waitingTrackInfo) : text(.noRate)
+                statusText = missingRatePollCount < 20 ? text(.waitingTrackInfo) : text(.noRate)
                 return
             }
             missingRatePollCount = 0

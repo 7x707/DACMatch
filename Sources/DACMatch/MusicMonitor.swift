@@ -66,10 +66,22 @@ final class MusicMonitor {
     end tell
     """
 
+    private static let sampleRateScript = """
+    tell application "Music"
+        try
+            return sample rate of current track
+        on error
+            return 0
+        end try
+    end tell
+    """
+
     private lazy var snapshotAppleScript = NSAppleScript(source: Self.script)
     private lazy var artworkAppleScript = NSAppleScript(source: Self.artworkScript)
     private lazy var pauseAppleScript = NSAppleScript(source: "tell application \"Music\" to pause")
     private lazy var playAppleScript = NSAppleScript(source: "tell application \"Music\" to play")
+    private lazy var sampleRateAppleScript = NSAppleScript(source: Self.sampleRateScript)
+    private var knownSampleRates: [String: Double] = [:]
 
     func snapshot() throws -> MusicPlaybackSnapshot {
         guard let appleScript = snapshotAppleScript else {
@@ -83,7 +95,28 @@ final class MusicMonitor {
         }
 
         guard let value = result.stringValue else { throw MusicMonitorError.invalidResponse }
-        return try Self.parseSnapshot(value)
+        let snapshot = try Self.parseSnapshot(value)
+        guard let track = snapshot.track else { return snapshot }
+
+        if track.sampleRate > 0 {
+            knownSampleRates[track.persistentID] = track.sampleRate
+            return snapshot
+        }
+
+        let recoveredRate = readCurrentSampleRate()
+            ?? knownSampleRates[track.persistentID]
+            ?? 0
+        guard recoveredRate > 0 else { return snapshot }
+        knownSampleRates[track.persistentID] = recoveredRate
+        return MusicPlaybackSnapshot(
+            state: snapshot.state,
+            track: MusicTrack(
+                persistentID: track.persistentID,
+                name: track.name,
+                artist: track.artist,
+                sampleRate: recoveredRate
+            )
+        )
     }
 
     static func parseSnapshot(_ value: String) throws -> MusicPlaybackSnapshot {
@@ -169,5 +202,13 @@ final class MusicMonitor {
             let message = error[NSAppleScript.errorMessage] as? String ?? error.description
             throw MusicMonitorError.scriptFailed(message)
         }
+    }
+
+    private func readCurrentSampleRate() -> Double? {
+        guard let appleScript = sampleRateAppleScript else { return nil }
+        var error: NSDictionary?
+        let result = appleScript.executeAndReturnError(&error)
+        guard error == nil, result.doubleValue > 0 else { return nil }
+        return result.doubleValue
     }
 }

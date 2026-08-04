@@ -112,7 +112,7 @@ private struct DACMatchPanel: View {
             HStack(spacing: 12) {
                 rateMetric(
                     title: "APPLE MUSIC",
-                    value: state.track.map { SampleRateFormatter.string($0.sampleRate) } ?? "—"
+                    value: sourceRateLabel
                 )
 
                 Image(systemName: "arrow.right")
@@ -435,6 +435,11 @@ private struct DACMatchPanel: View {
     private var appVersionLabel: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         return version.map { "DAC Match  \($0)" } ?? "DAC Match"
+    }
+
+    private var sourceRateLabel: String {
+        guard let rate = state.track?.sampleRate, rate > 0 else { return "—" }
+        return SampleRateFormatter.string(rate)
     }
 
     private func delayLabel(_ seconds: Double) -> String {
