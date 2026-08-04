@@ -59,6 +59,8 @@ final class AppState: ObservableObject {
     private var artworkTrackID: String?
     private var artworkLoadAttempts = 0
     private var nextArtworkLoadDate: Date?
+    private var catalogArtworkTask: Task<Void, Never>?
+    private var catalogArtworkRequestedTrackID: String?
     private var lastDeviceRefreshDate: Date?
     private var missingRatePollCount = 0
 
@@ -96,6 +98,8 @@ final class AppState: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
+        catalogArtworkTask?.cancel()
+        catalogArtworkTask = nil
     }
 
     func refreshDevices() {
@@ -227,6 +231,9 @@ final class AppState: ObservableObject {
                 artworkImage = nil
                 artworkTrackID = nil
                 artworkLoadAttempts = 0
+                catalogArtworkTask?.cancel()
+                catalogArtworkTask = nil
+                catalogArtworkRequestedTrackID = nil
                 refreshDeviceRate()
                 return
             }
@@ -242,6 +249,9 @@ final class AppState: ObservableObject {
                 artworkTrackID = newTrack.persistentID
                 artworkLoadAttempts = 0
                 nextArtworkLoadDate = nil
+                catalogArtworkTask?.cancel()
+                catalogArtworkTask = nil
+                catalogArtworkRequestedTrackID = nil
                 missingRatePollCount = 0
             }
             loadArtworkIfNeeded(for: newTrack)
@@ -740,11 +750,34 @@ final class AppState: ObservableObject {
 
         artworkLoadAttempts += 1
         nextArtworkLoadDate = Date().addingTimeInterval(1)
-        guard let data = try? musicMonitor.currentArtworkData(),
-              let image = NSImage(data: data)
+        if let data = try? musicMonitor.currentArtworkData(),
+           let image = NSImage(data: data) {
+            catalogArtworkTask?.cancel()
+            catalogArtworkTask = nil
+            artworkImage = image
+            nextArtworkLoadDate = nil
+            return
+        }
+
+        // Streaming tracks frequently expose no AppleScript artwork at all. Give
+        // Music a brief chance to populate it, then fall back to Apple's public
+        // catalog without blocking the polling or sample-rate switching path.
+        guard artworkLoadAttempts >= 2,
+              catalogArtworkRequestedTrackID != currentTrack.persistentID
         else { return }
-        artworkImage = image
-        nextArtworkLoadDate = nil
+        catalogArtworkRequestedTrackID = currentTrack.persistentID
+        catalogArtworkTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let data = await self.musicMonitor.catalogArtworkData(for: currentTrack)
+            guard !Task.isCancelled,
+                  self.artworkTrackID == currentTrack.persistentID,
+                  let data,
+                  let image = NSImage(data: data)
+            else { return }
+            self.artworkImage = image
+            self.nextArtworkLoadDate = nil
+            self.catalogArtworkTask = nil
+        }
     }
 
     private func setError(_ error: Error) {

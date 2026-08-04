@@ -4,6 +4,7 @@ struct MusicTrack: Equatable, Sendable {
     let persistentID: String
     let name: String
     let artist: String
+    let album: String
     let sampleRate: Double
 }
 
@@ -46,8 +47,9 @@ final class MusicMonitor {
             set trackID to persistent ID of currentItem as text
             set trackName to name of currentItem as text
             set trackArtist to artist of currentItem as text
+            set trackAlbum to album of currentItem as text
             set trackRate to sample rate of currentItem as text
-            return stateText & (ASCII character 30) & trackID & (ASCII character 30) & trackName & (ASCII character 30) & trackArtist & (ASCII character 30) & trackRate
+            return stateText & (ASCII character 30) & trackID & (ASCII character 30) & trackName & (ASCII character 30) & trackArtist & (ASCII character 30) & trackAlbum & (ASCII character 30) & trackRate
         on error
             return stateText
         end try
@@ -114,6 +116,7 @@ final class MusicMonitor {
                 persistentID: track.persistentID,
                 name: track.name,
                 artist: track.artist,
+                album: track.album,
                 sampleRate: recoveredRate
             )
         )
@@ -127,19 +130,21 @@ final class MusicMonitor {
         guard fields.count > 1 else {
             return MusicPlaybackSnapshot(state: state, track: nil)
         }
-        guard fields.count == 5, !fields[1].isEmpty else {
+        guard (fields.count == 5 || fields.count == 6), !fields[1].isEmpty else {
             return MusicPlaybackSnapshot(state: state, track: nil)
         }
         // Apple Music can briefly return "missing value" or an empty sample rate
         // while changing streaming tracks. Keep the metadata and retry the rate on
         // the next poll instead of treating this transition frame as a disconnect.
-        let rate = Double(fields[4]) ?? 0
+        let album = fields.count == 6 ? fields[4] : ""
+        let rate = Double(fields.last ?? "") ?? 0
         return MusicPlaybackSnapshot(
             state: state,
             track: MusicTrack(
                 persistentID: fields[1],
                 name: fields[2],
                 artist: fields[3],
+                album: album,
                 sampleRate: rate
             )
         )
@@ -158,6 +163,28 @@ final class MusicMonitor {
 
         guard result.descriptorType != typeNull else { return nil }
         return result.data
+    }
+
+    @MainActor
+    func catalogArtworkData(for track: MusicTrack) async -> Data? {
+        var components = URLComponents(string: "https://itunes.apple.com/search")
+        components?.queryItems = [
+            URLQueryItem(name: "term", value: [track.artist, track.album, track.name].joined(separator: " ")),
+            URLQueryItem(name: "country", value: "HK"),
+            URLQueryItem(name: "media", value: "music"),
+            URLQueryItem(name: "entity", value: "song"),
+            URLQueryItem(name: "limit", value: "10")
+        ]
+        guard let url = components?.url,
+              let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let search = try? JSONDecoder().decode(CatalogSearchResponse.self, from: data),
+              let result = bestCatalogMatch(for: track, candidates: search.results),
+              let artworkURL = enlargedArtworkURL(result.artworkUrl100),
+              let (artworkData, artworkResponse) = try? await URLSession.shared.data(from: artworkURL),
+              (artworkResponse as? HTTPURLResponse)?.statusCode == 200
+        else { return nil }
+        return artworkData
     }
 
     func pause() throws {
@@ -211,4 +238,60 @@ final class MusicMonitor {
         guard error == nil, result.doubleValue > 0 else { return nil }
         return result.doubleValue
     }
+
+    private func bestCatalogMatch(
+        for track: MusicTrack,
+        candidates: [CatalogSearchResult]
+    ) -> CatalogSearchResult? {
+        let targetName = normalized(track.name)
+        let targetArtist = normalized(track.artist)
+        let targetAlbum = normalized(track.album)
+
+        let scored = candidates.map { candidate -> (CatalogSearchResult, Int) in
+            let name = normalized(candidate.trackName)
+            let artist = normalized(candidate.artistName)
+            let album = normalized(candidate.collectionName ?? "")
+            var score = 0
+            if name == targetName { score += 8 }
+            else if name.contains(targetName) || targetName.contains(name) { score += 4 }
+            if artist == targetArtist { score += 6 }
+            else if artist.contains(targetArtist) || targetArtist.contains(artist) { score += 3 }
+            if !targetAlbum.isEmpty {
+                if album == targetAlbum { score += 7 }
+                else if album.contains(targetAlbum) || targetAlbum.contains(album) { score += 3 }
+            }
+            return (candidate, score)
+        }
+        guard let best = scored.max(by: { $0.1 < $1.1 }), best.1 >= 8 else { return nil }
+        return best.0
+    }
+
+    private func normalized(_ value: String) -> String {
+        value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .unicodeScalars
+            .filter { CharacterSet.alphanumerics.contains($0) }
+            .map(String.init)
+            .joined()
+    }
+
+    private func enlargedArtworkURL(_ value: String?) -> URL? {
+        guard let value else { return nil }
+        let enlarged = value.replacingOccurrences(
+            of: #"\d+x\d+"#,
+            with: "600x600",
+            options: .regularExpression
+        )
+        return URL(string: enlarged)
+    }
+}
+
+private struct CatalogSearchResponse: Decodable {
+    let results: [CatalogSearchResult]
+}
+
+private struct CatalogSearchResult: Decodable {
+    let trackName: String
+    let artistName: String
+    let collectionName: String?
+    let artworkUrl100: String?
 }

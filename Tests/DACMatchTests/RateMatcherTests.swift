@@ -44,6 +44,16 @@ import Testing
     #expect(snapshot.track?.sampleRate == 96_000)
 }
 
+@Test func musicSnapshotIncludesAlbumForArtworkMatching() throws {
+    let separator = String(UnicodeScalar(30))
+    let value = ["playing", "TRACK-ALBUM", "Example", "Artist", "Album", "44100"]
+        .joined(separator: separator)
+    let snapshot = try MusicMonitor.parseSnapshot(value)
+
+    #expect(snapshot.track?.album == "Album")
+    #expect(snapshot.track?.sampleRate == 44_100)
+}
+
 @Test func stoppedMusicSnapshotCanHaveNoTrack() throws {
     let snapshot = try MusicMonitor.parseSnapshot("stopped")
     #expect(snapshot.state == .stopped)
