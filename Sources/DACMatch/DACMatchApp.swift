@@ -194,32 +194,6 @@ private struct DACMatchPanel: View {
             insetDivider
 
             HStack(spacing: 11) {
-                settingTitle(icon: "timer", title: state.text(.lockWait))
-                Spacer(minLength: 10)
-                Menu {
-                    ForEach([0.5, 1.0, 2.0, 3.0, 5.0], id: \.self) { seconds in
-                        Button {
-                            state.dacLockDelaySeconds = seconds
-                        } label: {
-                            if state.dacLockDelaySeconds == seconds {
-                                Label(delayLabel(seconds), systemImage: "checkmark")
-                            } else {
-                                Text(delayLabel(seconds))
-                            }
-                        }
-                    }
-                } label: {
-                    menuValueLabel(delayLabel(state.dacLockDelaySeconds))
-                }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-            }
-            .padding(12)
-
-            insetDivider
-
-            HStack(spacing: 11) {
                 settingTitle(icon: "globe", title: state.text(.language))
                 Spacer(minLength: 10)
                 Menu {
@@ -440,12 +414,6 @@ private struct DACMatchPanel: View {
     private var sourceRateLabel: String {
         guard let rate = state.track?.sampleRate, rate > 0 else { return "—" }
         return SampleRateFormatter.string(rate)
-    }
-
-    private func delayLabel(_ seconds: Double) -> String {
-        seconds.rounded() == seconds
-            ? state.text(.secondsInteger, Int(seconds))
-            : state.text(.secondsDecimal, seconds)
     }
 
     private func deviceMenuName(_ device: AudioDevice) -> String {

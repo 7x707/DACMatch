@@ -34,20 +34,10 @@ final class AppState: ObservableObject {
         }
     }
     @Published private(set) var launchAtLogin = false
-    @Published var dacLockDelaySeconds: Double {
-        didSet {
-            defaults.set(dacLockDelaySeconds, forKey: Keys.dacLockDelay)
-            lastAppliedTrackID = nil
-            switchAttemptsForTrack = 0
-            nextRetryDate = nil
-            diagnosticText = nil
-            statusText = text(.waitUpdated)
-        }
-    }
-
     private let defaults: UserDefaults
     private let audioManager = CoreAudioDeviceManager()
     private let musicMonitor = MusicMonitor()
+    private let sampleRateConfirmationTimeout: TimeInterval = 2.0
     private var timer: Timer?
     private var lastAppliedTrackID: String?
     private var consecutiveErrorKey: String?
@@ -67,7 +57,6 @@ final class AppState: ObservableObject {
     private enum Keys {
         static let autoMatch = "autoMatchEnabled"
         static let deviceUID = "selectedDeviceUID"
-        static let dacLockDelay = "dacLockDelaySeconds"
         static let language = "appLanguage"
     }
 
@@ -81,7 +70,6 @@ final class AppState: ObservableObject {
             autoMatchEnabled = defaults.bool(forKey: Keys.autoMatch)
         }
         selectedDeviceUID = defaults.string(forKey: Keys.deviceUID)
-        dacLockDelaySeconds = defaults.object(forKey: Keys.dacLockDelay) as? Double ?? 1.0
         launchAtLogin = SMAppService.mainApp.status == .enabled
         statusText = AppCopy.text(.starting, language: language)
     }
@@ -344,7 +332,7 @@ final class AppState: ObservableObject {
             let confirmedRate = try await waitForStableSampleRate(
                 rate,
                 device: device,
-                timeout: max(0.5, dacLockDelaySeconds),
+                timeout: sampleRateConfirmationTimeout,
                 stableFor: 0.15
             )
 
@@ -360,7 +348,7 @@ final class AppState: ObservableObject {
                 let postResumeRate = try await waitForStableSampleRate(
                     rate,
                     device: device,
-                    timeout: max(0.8, dacLockDelaySeconds),
+                    timeout: sampleRateConfirmationTimeout,
                     stableFor: 0.25
                 )
                 try await waitForDeviceToStartRunning(device.id, timeout: 1.0)
@@ -428,7 +416,7 @@ final class AppState: ObservableObject {
                 deviceSampleRate = try await waitForStableSampleRate(
                     currentTrack.sampleRate,
                     device: device,
-                    timeout: max(0.5, dacLockDelaySeconds),
+                    timeout: sampleRateConfirmationTimeout,
                     stableFor: 0.2
                 )
                 lastAppliedTrackID = currentTrack.persistentID
@@ -514,7 +502,7 @@ final class AppState: ObservableObject {
                 _ = try await waitForStableSampleRate(
                     relockRate,
                     device: device,
-                    timeout: max(0.5, dacLockDelaySeconds),
+                    timeout: sampleRateConfirmationTimeout,
                     stableFor: 0.15
                 )
                 currentRate = relockRate
@@ -527,7 +515,7 @@ final class AppState: ObservableObject {
             deviceSampleRate = try await waitForStableSampleRate(
                 targetRate,
                 device: device,
-                timeout: max(0.5, dacLockDelaySeconds),
+                timeout: sampleRateConfirmationTimeout,
                 stableFor: 0.2
             )
 

@@ -96,11 +96,4 @@ import Testing
             arguments: ["WALKMAN"]
         ) == "Switching safely to WALKMAN…"
     )
-    #expect(
-        AppCopy.text(
-            .secondsDecimal,
-            language: .traditionalChinese,
-            arguments: [0.5]
-        ) == "0.5 秒"
-    )
 }

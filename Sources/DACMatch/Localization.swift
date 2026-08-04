@@ -17,7 +17,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
 }
 
 enum CopyKey: String, Sendable {
-    case starting, waitUpdated, switchingTo, rematching, rebuildingStream, noDAC
+    case starting, switchingTo, rematching, rebuildingStream, noDAC
     case selectSong, noRate, autoPaused, selectDAC, matched, prematched
     case waitingRetry, outputMismatch, safeRateSwitch, preparingSwitch, pauseMusic
     case writeRate, waitDAC, resumeMusic, verifyOutput, matchedPlaying
@@ -27,9 +27,8 @@ enum CopyKey: String, Sendable {
     case recoveryFailed, waitRateTimeout, defaultNotConfirmed, streamNotDetected
     case retryPaused, retryAfter, waitingTrackInfo, connecting
     case rematch, recoverSound, quit, noTrack, unknownArtist, startAppleMusic
-    case autoMatch, enabled, disabled, outputDevice, noDevices, rescan, lockWait
+    case autoMatch, enabled, disabled, outputDevice, noDevices, rescan
     case launchAtLogin, language, playing, paused, appleMusic, currentDefault
-    case secondsInteger, secondsDecimal
 }
 
 enum AppCopy {
@@ -62,7 +61,6 @@ enum AppCopy {
     private static let table: [AppLanguage: [CopyKey: String]] = [
         .simplifiedChinese: [
             .starting: "正在启动…",
-            .waitUpdated: "等待时间已更新，准备重新匹配",
             .switchingTo: "正在安全切换到 %@…",
             .rematching: "正在重新匹配…",
             .rebuildingStream: "正在重建 Apple Music 音频流…",
@@ -115,19 +113,15 @@ enum AppCopy {
             .outputDevice: "输出设备",
             .noDevices: "没有找到输出设备",
             .rescan: "重新扫描",
-            .lockWait: "DAC 锁定等待",
             .launchAtLogin: "登录时启动",
             .language: "语言",
             .playing: "正在播放",
             .paused: "已暂停",
             .appleMusic: "Apple Music",
             .currentDefault: "（当前默认）",
-            .secondsInteger: "%d 秒",
-            .secondsDecimal: "%.1f 秒"
         ],
         .traditionalChinese: [
             .starting: "正在啟動…",
-            .waitUpdated: "等待時間已更新，準備重新匹配",
             .switchingTo: "正在安全切換至 %@…",
             .rematching: "正在重新匹配…",
             .rebuildingStream: "正在重建 Apple Music 音訊串流…",
@@ -180,19 +174,15 @@ enum AppCopy {
             .outputDevice: "輸出裝置",
             .noDevices: "找不到輸出裝置",
             .rescan: "重新掃描",
-            .lockWait: "DAC 鎖定等待",
             .launchAtLogin: "登入時啟動",
             .language: "語言",
             .playing: "正在播放",
             .paused: "已暫停",
             .appleMusic: "Apple Music",
             .currentDefault: "（目前預設）",
-            .secondsInteger: "%d 秒",
-            .secondsDecimal: "%.1f 秒"
         ],
         .english: [
             .starting: "Starting…",
-            .waitUpdated: "Lock wait updated; preparing to rematch",
             .switchingTo: "Switching safely to %@…",
             .rematching: "Rematching…",
             .rebuildingStream: "Rebuilding the Apple Music audio stream…",
@@ -245,15 +235,12 @@ enum AppCopy {
             .outputDevice: "Output Device",
             .noDevices: "No output devices found",
             .rescan: "Rescan",
-            .lockWait: "DAC Lock Wait",
             .launchAtLogin: "Launch at Login",
             .language: "Language",
             .playing: "Playing",
             .paused: "Paused",
             .appleMusic: "Apple Music",
             .currentDefault: " (Current)",
-            .secondsInteger: "%d sec",
-            .secondsDecimal: "%.1f sec"
         ]
     ]
 }
