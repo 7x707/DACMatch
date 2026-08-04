@@ -94,6 +94,11 @@ import Testing
     #expect(AppCopy.text(.rematch, language: .english) == "Rematch")
 }
 
+@Test func menuBarDisplayDefaultsToIconOnly() {
+    #expect(MenuBarDisplayMode.defaultMode == .iconOnly)
+    #expect(AppCopy.text(.iconAndRate, language: .simplifiedChinese) == "图标和采样率")
+}
+
 @Test func localizedCopyFormatsValues() {
     #expect(
         AppCopy.text(

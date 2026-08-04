@@ -26,6 +26,9 @@ final class AppState: ObservableObject {
     @Published var autoMatchEnabled: Bool {
         didSet { defaults.set(autoMatchEnabled, forKey: Keys.autoMatch) }
     }
+    @Published var menuBarDisplayMode: MenuBarDisplayMode {
+        didSet { defaults.set(menuBarDisplayMode.rawValue, forKey: Keys.menuBarDisplayMode) }
+    }
     @Published var selectedDeviceUID: String? {
         didSet {
             defaults.set(selectedDeviceUID, forKey: Keys.deviceUID)
@@ -58,6 +61,7 @@ final class AppState: ObservableObject {
         static let autoMatch = "autoMatchEnabled"
         static let deviceUID = "selectedDeviceUID"
         static let language = "appLanguage"
+        static let menuBarDisplayMode = "menuBarDisplayMode"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -69,6 +73,9 @@ final class AppState: ObservableObject {
         } else {
             autoMatchEnabled = defaults.bool(forKey: Keys.autoMatch)
         }
+        menuBarDisplayMode = MenuBarDisplayMode(
+            rawValue: defaults.string(forKey: Keys.menuBarDisplayMode) ?? ""
+        ) ?? .defaultMode
         selectedDeviceUID = defaults.string(forKey: Keys.deviceUID)
         launchAtLogin = SMAppService.mainApp.status == .enabled
         statusText = AppCopy.text(.starting, language: language)

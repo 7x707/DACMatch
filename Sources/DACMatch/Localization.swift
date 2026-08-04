@@ -16,6 +16,23 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum MenuBarDisplayMode: String, CaseIterable, Identifiable, Sendable {
+    case iconOnly
+    case iconAndRate
+    case rateOnly
+
+    static let defaultMode: Self = .iconOnly
+    var id: String { rawValue }
+
+    var copyKey: CopyKey {
+        switch self {
+        case .iconOnly: return .iconOnly
+        case .iconAndRate: return .iconAndRate
+        case .rateOnly: return .rateOnly
+        }
+    }
+}
+
 enum CopyKey: String, Sendable {
     case starting, switchingTo, rematching, rebuildingStream, noDAC
     case selectSong, noRate, autoPaused, selectDAC, matched, prematched, resampling
@@ -28,6 +45,7 @@ enum CopyKey: String, Sendable {
     case retryPaused, retryAfter, waitingTrackInfo, connecting
     case rematch, recoverSound, quit, noTrack, unknownArtist, startAppleMusic
     case autoMatch, enabled, disabled, outputDevice, noDevices, rescan
+    case menuBarDisplay, iconOnly, iconAndRate, rateOnly
     case launchAtLogin, language, playing, paused, appleMusic, currentDefault
 }
 
@@ -114,6 +132,10 @@ enum AppCopy {
             .outputDevice: "输出设备",
             .noDevices: "没有找到输出设备",
             .rescan: "重新扫描",
+            .menuBarDisplay: "菜单栏显示",
+            .iconOnly: "仅图标",
+            .iconAndRate: "图标和采样率",
+            .rateOnly: "仅采样率",
             .launchAtLogin: "登录时启动",
             .language: "语言",
             .playing: "正在播放",
@@ -176,6 +198,10 @@ enum AppCopy {
             .outputDevice: "輸出裝置",
             .noDevices: "找不到輸出裝置",
             .rescan: "重新掃描",
+            .menuBarDisplay: "選單列顯示",
+            .iconOnly: "僅圖示",
+            .iconAndRate: "圖示和取樣率",
+            .rateOnly: "僅取樣率",
             .launchAtLogin: "登入時啟動",
             .language: "語言",
             .playing: "正在播放",
@@ -238,6 +264,10 @@ enum AppCopy {
             .outputDevice: "Output Device",
             .noDevices: "No output devices found",
             .rescan: "Rescan",
+            .menuBarDisplay: "Menu Bar Display",
+            .iconOnly: "Icon Only",
+            .iconAndRate: "Icon and Sample Rate",
+            .rateOnly: "Sample Rate Only",
             .launchAtLogin: "Launch at Login",
             .language: "Language",
             .playing: "Playing",

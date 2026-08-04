@@ -14,9 +14,24 @@ struct DACMatchApp: App {
         MenuBarExtra {
             DACMatchPanel(state: state)
         } label: {
-            Label(state.menuBarTitle, systemImage: "waveform")
+            menuBarLabel
         }
         .menuBarExtraStyle(.window)
+    }
+
+    @ViewBuilder
+    private var menuBarLabel: some View {
+        switch state.menuBarDisplayMode {
+        case .iconOnly:
+            Image(systemName: "waveform")
+                .accessibilityLabel("DAC Match")
+        case .iconAndRate:
+            Label(state.menuBarTitle, systemImage: "waveform")
+                .accessibilityLabel("DAC Match \(state.menuBarTitle)")
+        case .rateOnly:
+            Text(state.menuBarTitle)
+                .accessibilityLabel("DAC Match \(state.menuBarTitle)")
+        }
     }
 }
 
@@ -158,6 +173,32 @@ private struct DACMatchPanel: View {
                 )
             }
             .toggleStyle(.switch)
+            .padding(12)
+
+            insetDivider
+
+            HStack(spacing: 11) {
+                settingTitle(icon: "menubar.rectangle", title: state.text(.menuBarDisplay))
+                Spacer(minLength: 10)
+                Menu {
+                    ForEach(MenuBarDisplayMode.allCases) { mode in
+                        Button {
+                            state.menuBarDisplayMode = mode
+                        } label: {
+                            if mode == state.menuBarDisplayMode {
+                                Label(state.text(mode.copyKey), systemImage: "checkmark")
+                            } else {
+                                Text(state.text(mode.copyKey))
+                            }
+                        }
+                    }
+                } label: {
+                    menuValueLabel(state.text(state.menuBarDisplayMode.copyKey))
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+            }
             .padding(12)
 
             insetDivider
