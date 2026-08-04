@@ -34,24 +34,8 @@ import Testing
 }
 
 @Test func sameRateTrackDoesNotRefreshAudioStream() {
-    #expect(
-        !StreamRefreshPolicy.requiresRefresh(
-            previousTrackRate: 44_100,
-            newTrackRate: 44_100
-        )
-    )
-    #expect(
-        StreamRefreshPolicy.requiresRefresh(
-            previousTrackRate: 44_100,
-            newTrackRate: 48_000
-        )
-    )
-    #expect(
-        StreamRefreshPolicy.requiresRefresh(
-            previousTrackRate: nil,
-            newTrackRate: 48_000
-        )
-    )
+    #expect(!RateMatcher.needsSwitch(from: 44_100, to: 44_100))
+    #expect(RateMatcher.needsSwitch(from: 44_100, to: 48_000))
 }
 
 @Test func pausedMusicSnapshotKeepsCurrentTrack() throws {
@@ -119,28 +103,4 @@ import Testing
             arguments: [0.5]
         ) == "0.5 秒"
     )
-}
-
-@Test func walkmanDevicesRequestTrackStreamRefresh() {
-    let walkman = AudioDevice(
-        id: 1,
-        uid: "sony-walkman",
-        name: "WALKMAN",
-        transportType: kAudioDeviceTransportTypeUSB,
-        availableSampleRates: [44_100, 48_000],
-        isDefaultOutput: true
-    )
-    let speakers = AudioDevice(
-        id: 2,
-        uid: "built-in-output",
-        name: "Mac mini Speakers",
-        transportType: kAudioDeviceTransportTypeBuiltIn,
-        availableSampleRates: [44_100, 48_000],
-        isDefaultOutput: false
-    )
-
-    #expect(walkman.requiresTrackStreamRefresh)
-    #expect(walkman.requiresRouteReset)
-    #expect(!speakers.requiresTrackStreamRefresh)
-    #expect(!speakers.requiresRouteReset)
 }

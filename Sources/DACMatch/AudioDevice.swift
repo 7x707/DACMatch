@@ -13,21 +13,6 @@ struct AudioDevice: Identifiable, Hashable, Sendable {
         isDefaultOutput ? "\(name)（当前默认）" : name
     }
 
-    var requiresTrackStreamRefresh: Bool {
-        name.localizedCaseInsensitiveContains("walkman")
-            || uid.localizedCaseInsensitiveContains("walkman")
-    }
-
-    var requiresRouteReset: Bool {
-        transportType != kAudioDeviceTransportTypeBuiltIn
-    }
-}
-
-enum StreamRefreshPolicy {
-    static func requiresRefresh(previousTrackRate: Double?, newTrackRate: Double) -> Bool {
-        guard let previousTrackRate else { return true }
-        return abs(previousTrackRate - newTrackRate) >= 1
-    }
 }
 
 enum CoreAudioError: LocalizedError {
@@ -301,6 +286,10 @@ enum RateMatcher {
 
     static func supports(_ rate: Double, ranges: [AudioValueRange]) -> Bool {
         ranges.contains { rate >= $0.mMinimum && rate <= $0.mMaximum }
+    }
+
+    static func needsSwitch(from currentRate: Double, to targetRate: Double) -> Bool {
+        abs(currentRate - targetRate) >= 1
     }
 
     static func discreteRates(from ranges: [AudioValueRange]) -> [Double] {

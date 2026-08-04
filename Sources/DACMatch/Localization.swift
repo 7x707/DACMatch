@@ -25,8 +25,7 @@ enum CopyKey: String, Sendable {
     case waitNewStable, resumeOnNew, confirmNewStream, rebuildNewStream
     case switchedPlaying, systemSwitched, switchFailed, streamRefreshed
     case recoveryFailed, waitRateTimeout, defaultNotConfirmed, streamNotDetected
-    case retryPaused, retryAfter, refreshingTrackStream, waitingTrackInfo, connecting
-    case routeAway, routeBack, noFallbackOutput
+    case retryPaused, retryAfter, waitingTrackInfo, connecting
     case rematch, recoverSound, quit, noTrack, unknownArtist, startAppleMusic
     case autoMatch, enabled, disabled, outputDevice, noDevices, rescan, lockWait
     case launchAtLogin, language, playing, paused, appleMusic, currentDefault
@@ -102,12 +101,8 @@ enum AppCopy {
             .streamNotDetected: "新输出设备没有检测到音频流",
             .retryPaused: "自动重试已暂停，请手动重新匹配",
             .retryAfter: "匹配未稳定，%.1f 秒后重试",
-            .refreshingTrackStream: "正在为新曲目刷新 WALKMAN 音频流…",
             .waitingTrackInfo: "Apple Music 正在载入曲目信息…",
             .connecting: "正在连接 Apple Music…",
-            .routeAway: "正在释放 DAC 音频路由…",
-            .routeBack: "正在将系统输出切回 DAC…",
-            .noFallbackOutput: "没有可用于重置路由的备用输出设备",
             .rematch: "重新匹配",
             .recoverSound: "恢复声音",
             .quit: "退出",
@@ -171,12 +166,8 @@ enum AppCopy {
             .streamNotDetected: "新輸出裝置未偵測到音訊串流",
             .retryPaused: "自動重試已暫停，請手動重新匹配",
             .retryAfter: "匹配未穩定，%.1f 秒後重試",
-            .refreshingTrackStream: "正在為新歌曲刷新 WALKMAN 音訊串流…",
             .waitingTrackInfo: "Apple Music 正在載入歌曲資訊…",
             .connecting: "正在連接 Apple Music…",
-            .routeAway: "正在釋放 DAC 音訊路由…",
-            .routeBack: "正在將系統輸出切回 DAC…",
-            .noFallbackOutput: "沒有可用於重設路由的備用輸出裝置",
             .rematch: "重新匹配",
             .recoverSound: "恢復聲音",
             .quit: "結束",
@@ -240,12 +231,8 @@ enum AppCopy {
             .streamNotDetected: "No audio stream was detected on the new output device",
             .retryPaused: "Automatic retries paused; rematch manually",
             .retryAfter: "Match is unstable; retrying in %.1f seconds",
-            .refreshingTrackStream: "Refreshing the WALKMAN stream for the new track…",
             .waitingTrackInfo: "Apple Music is loading track information…",
             .connecting: "Connecting to Apple Music…",
-            .routeAway: "Releasing the DAC audio route…",
-            .routeBack: "Switching system output back to the DAC…",
-            .noFallbackOutput: "No fallback output device is available to reset the route",
             .rematch: "Rematch",
             .recoverSound: "Restore Sound",
             .quit: "Quit",
