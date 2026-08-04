@@ -98,7 +98,7 @@ private struct DACMatchPanel: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
 
-                Label(playbackLabel, systemImage: playbackSymbol)
+                Label(connectionLabel, systemImage: playbackSymbol)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(playbackTint)
             }
@@ -173,7 +173,7 @@ private struct DACMatchPanel: View {
                         Button {
                             state.selectDevice(device)
                         } label: {
-                            if device.uid == state.selectedDeviceUID {
+                            if device.uid == state.actualOutputDeviceUID {
                                 Label(deviceMenuName(device), systemImage: "checkmark")
                             } else {
                                 Text(deviceMenuName(device))
@@ -408,7 +408,14 @@ private struct DACMatchPanel: View {
         }
     }
 
+    private var connectionLabel: String {
+        guard state.musicConnected else { return state.text(.connecting) }
+        guard state.playbackState != .stopped else { return state.text(.appleMusic) }
+        return "\(state.text(.appleMusic)) · \(playbackLabel)"
+    }
+
     private var playbackSymbol: String {
+        guard state.musicConnected else { return "link" }
         switch state.playbackState {
         case .playing: return "waveform"
         case .paused: return "pause.fill"
@@ -417,6 +424,7 @@ private struct DACMatchPanel: View {
     }
 
     private var playbackTint: Color {
+        guard state.musicConnected else { return .orange }
         switch state.playbackState {
         case .playing: return .green
         case .paused: return .orange
@@ -436,6 +444,8 @@ private struct DACMatchPanel: View {
     }
 
     private func deviceMenuName(_ device: AudioDevice) -> String {
-        device.isDefaultOutput ? device.name + state.text(.currentDefault) : device.name
+        device.uid == state.actualOutputDeviceUID
+            ? device.name + state.text(.currentDefault)
+            : device.name
     }
 }

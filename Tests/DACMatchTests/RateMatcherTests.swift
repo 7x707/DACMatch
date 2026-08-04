@@ -40,6 +40,23 @@ import Testing
     #expect(snapshot.track == nil)
 }
 
+@Test func transitionalTrackMetadataIsRetainedWithoutSampleRate() throws {
+    let separator = String(UnicodeScalar(30))
+    let value = ["playing", "TRACK-2", "Loading Track", "Artist", "missing value"]
+        .joined(separator: separator)
+    let snapshot = try MusicMonitor.parseSnapshot(value)
+
+    #expect(snapshot.state == .playing)
+    #expect(snapshot.track?.persistentID == "TRACK-2")
+    #expect(snapshot.track?.sampleRate == 0)
+}
+
+@Test func playingStateCanTemporarilyHaveNoTrackMetadata() throws {
+    let snapshot = try MusicMonitor.parseSnapshot("playing")
+    #expect(snapshot.state == .playing)
+    #expect(snapshot.track == nil)
+}
+
 @Test func interfaceCopySupportsAllLanguages() {
     #expect(AppCopy.text(.rematch, language: .simplifiedChinese) == "重新匹配")
     #expect(AppCopy.text(.rematch, language: .traditionalChinese) == "重新匹配")

@@ -30,7 +30,7 @@ enum MusicMonitorError: LocalizedError {
     }
 }
 
-struct MusicMonitor {
+final class MusicMonitor {
     private static let script = """
     tell application "Music"
         if player state is playing then
@@ -66,8 +66,13 @@ struct MusicMonitor {
     end tell
     """
 
+    private lazy var snapshotAppleScript = NSAppleScript(source: Self.script)
+    private lazy var artworkAppleScript = NSAppleScript(source: Self.artworkScript)
+    private lazy var pauseAppleScript = NSAppleScript(source: "tell application \"Music\" to pause")
+    private lazy var playAppleScript = NSAppleScript(source: "tell application \"Music\" to play")
+
     func snapshot() throws -> MusicPlaybackSnapshot {
-        guard let appleScript = NSAppleScript(source: Self.script) else {
+        guard let appleScript = snapshotAppleScript else {
             throw MusicMonitorError.scriptFailed("无法创建自动化脚本")
         }
         var error: NSDictionary?
@@ -89,9 +94,13 @@ struct MusicMonitor {
         guard fields.count > 1 else {
             return MusicPlaybackSnapshot(state: state, track: nil)
         }
-        guard fields.count == 5, let rate = Double(fields[4]) else {
-            throw MusicMonitorError.invalidResponse
+        guard fields.count == 5, !fields[1].isEmpty else {
+            return MusicPlaybackSnapshot(state: state, track: nil)
         }
+        // Apple Music can briefly return "missing value" or an empty sample rate
+        // while changing streaming tracks. Keep the metadata and retry the rate on
+        // the next poll instead of treating this transition frame as a disconnect.
+        let rate = Double(fields[4]) ?? 0
         return MusicPlaybackSnapshot(
             state: state,
             track: MusicTrack(
@@ -104,7 +113,7 @@ struct MusicMonitor {
     }
 
     func currentArtworkData() throws -> Data? {
-        guard let appleScript = NSAppleScript(source: Self.artworkScript) else {
+        guard let appleScript = artworkAppleScript else {
             throw MusicMonitorError.scriptFailed("无法创建封面读取脚本")
         }
         var error: NSDictionary?
@@ -119,11 +128,11 @@ struct MusicMonitor {
     }
 
     func pause() throws {
-        try runCommand("tell application \"Music\" to pause")
+        try runCommand(pauseAppleScript)
     }
 
     func play() throws {
-        try runCommand("tell application \"Music\" to play")
+        try runCommand(playAppleScript)
     }
 
     func playerPosition() throws -> Double {
@@ -147,11 +156,11 @@ struct MusicMonitor {
             locale: Locale(identifier: "en_US_POSIX"),
             position
         )
-        try runCommand("tell application \"Music\" to set player position to \(value)")
+        try runCommand(NSAppleScript(source: "tell application \"Music\" to set player position to \(value)"))
     }
 
-    private func runCommand(_ source: String) throws {
-        guard let appleScript = NSAppleScript(source: source) else {
+    private func runCommand(_ appleScript: NSAppleScript?) throws {
+        guard let appleScript else {
             throw MusicMonitorError.scriptFailed("无法创建自动化脚本")
         }
         var error: NSDictionary?
