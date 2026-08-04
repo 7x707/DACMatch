@@ -53,6 +53,8 @@ final class AppState: ObservableObject {
     private var consecutiveErrorKey: String?
     private var isSwitching = false
     private var observedTrackID: String?
+    private var observedTrackSampleRate: Double?
+    private var previousTrackSampleRate: Double?
     private var switchAttemptsForTrack = 0
     private var nextRetryDate: Date?
     private let maximumSwitchAttempts = 4
@@ -226,6 +228,8 @@ final class AppState: ObservableObject {
                 statusText = text(.selectSong)
                 lastAppliedTrackID = nil
                 observedTrackID = nil
+                observedTrackSampleRate = nil
+                previousTrackSampleRate = nil
                 switchAttemptsForTrack = 0
                 nextRetryDate = nil
                 artworkImage = nil
@@ -240,7 +244,9 @@ final class AppState: ObservableObject {
             track = newTrack
             let trackChanged = observedTrackID != newTrack.persistentID
             if trackChanged {
+                previousTrackSampleRate = observedTrackSampleRate
                 observedTrackID = newTrack.persistentID
+                observedTrackSampleRate = newTrack.sampleRate > 0 ? newTrack.sampleRate : nil
                 switchAttemptsForTrack = 0
                 lastAppliedTrackID = nil
                 nextRetryDate = nil
@@ -253,6 +259,8 @@ final class AppState: ObservableObject {
                 catalogArtworkTask = nil
                 catalogArtworkRequestedTrackID = nil
                 missingRatePollCount = 0
+            } else if newTrack.sampleRate > 0 {
+                observedTrackSampleRate = newTrack.sampleRate
             }
             loadArtworkIfNeeded(for: newTrack)
             guard newTrack.sampleRate > 0 else {
@@ -275,7 +283,11 @@ final class AppState: ObservableObject {
             if abs(currentRate - newTrack.sampleRate) < 1 {
                 if snapshot.state == .playing,
                    device.requiresRouteReset,
-                   lastAppliedTrackID != newTrack.persistentID {
+                   lastAppliedTrackID != newTrack.persistentID,
+                   StreamRefreshPolicy.requiresRefresh(
+                       previousTrackRate: previousTrackSampleRate,
+                       newTrackRate: newTrack.sampleRate
+                   ) {
                     if let nextRetryDate, nextRetryDate > Date() {
                         statusText = text(.waitingRetry)
                         return
@@ -340,6 +352,9 @@ final class AppState: ObservableObject {
     ) async {
         var didPause = false
         var mustRestoreOutputRoute = false
+        var originalMusicVolume: Int?
+        var musicIsTemporarilyMuted = false
+        var resumedOnFallback = false
         var stage = text(.preparingSwitch)
         defer {
             if mustRestoreOutputRoute {
@@ -354,38 +369,69 @@ final class AppState: ObservableObject {
                     setError(error)
                 }
             }
+            if musicIsTemporarilyMuted, let originalMusicVolume {
+                try? musicMonitor.setSoundVolume(originalMusicVolume)
+            }
             isSwitching = false
         }
 
         do {
-            if musicWasPlaying {
-                stage = updateStage(.pauseMusic)
-                try musicMonitor.pause()
-                didPause = true
-                playbackState = .paused
-
-                // Give Apple Music time to release its old Core Audio stream before
-                // changing the hardware clock. Some USB DACs otherwise stop receiving audio.
-                try await Task<Never, Never>.sleep(nanoseconds: 650_000_000)
-            }
-
+            let fallback: AudioDevice?
             if device.requiresRouteReset {
-                guard let fallback = fallbackOutputDevice(excluding: device) else {
+                guard let availableFallback = fallbackOutputDevice(excluding: device) else {
                     throw CoreAudioError.propertyUnavailable(text(.noFallbackOutput))
                 }
+                fallback = availableFallback
+            } else {
+                fallback = nil
+            }
+
+            if musicWasPlaying, let fallback {
+                // Keep an active (but silent) Music stream while routing away. A
+                // route change performed only while paused can be ignored by Music,
+                // leaving it attached to the DAC's old USB stream.
+                originalMusicVolume = try musicMonitor.soundVolume()
+                if originalMusicVolume != 0 {
+                    try musicMonitor.setSoundVolume(0)
+                    musicIsTemporarilyMuted = true
+                }
+
                 stage = updateStage(.routeAway)
                 try audioManager.setDefaultOutputDevice(fallback.id)
                 mustRestoreOutputRoute = true
                 try await waitForDefaultOutputDevice(fallback.id, timeout: 2.0)
                 actualOutputDeviceUID = fallback.uid
+                try await waitForDeviceToStartRunning(fallback.id, timeout: 2.0)
+                try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
+
+                stage = updateStage(.pauseMusic)
+                try musicMonitor.pause()
+                didPause = true
+                playbackState = .paused
                 try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
+            } else {
+                if musicWasPlaying {
+                    stage = updateStage(.pauseMusic)
+                    try musicMonitor.pause()
+                    didPause = true
+                    playbackState = .paused
+                    try await Task<Never, Never>.sleep(nanoseconds: 650_000_000)
+                }
+                if let fallback {
+                    stage = updateStage(.routeAway)
+                    try audioManager.setDefaultOutputDevice(fallback.id)
+                    mustRestoreOutputRoute = true
+                    try await waitForDefaultOutputDevice(fallback.id, timeout: 2.0)
+                    actualOutputDeviceUID = fallback.uid
+                    try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
+                }
             }
 
             stage = updateStage(.writeRate)
+            let lockStartedAt = Date()
             try audioManager.setSampleRate(rate, for: device)
 
             // Observe until the new rate stays stable instead of trusting one instant read.
-            // The selected lock delay is a maximum wait, not a mandatory fixed pause.
             stage = updateStage(.waitDAC)
             let confirmedRate = try await waitForStableSampleRate(
                 rate,
@@ -394,20 +440,48 @@ final class AppState: ObservableObject {
                 stableFor: 0.25
             )
 
+            // Nominal rate can update before USB hardware is ready to accept a new
+            // stream. Honour the configured lock wait as a minimum idle interval.
+            let remainingLockWait = dacLockDelaySeconds - Date().timeIntervalSince(lockStartedAt)
+            if remainingLockWait > 0 {
+                try await Task<Never, Never>.sleep(
+                    nanoseconds: UInt64(remainingLockWait * 1_000_000_000)
+                )
+            }
+
             if mustRestoreOutputRoute {
+                if playWhenFinished, let fallback {
+                    // Start a muted stream on the fallback first, then move that live
+                    // stream to the DAC. This reproduces the manual output-device
+                    // switch that reliably wakes the WALKMAN after a clock change.
+                    stage = updateStage(.resumeMusic)
+                    try musicMonitor.play()
+                    didPause = false
+                    resumedOnFallback = true
+                    playbackState = .playing
+                    try await waitForDeviceToStartRunning(fallback.id, timeout: 2.0)
+                    try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
+                }
+
                 stage = updateStage(.routeBack)
                 try audioManager.setDefaultOutputDevice(device.id)
                 try await waitForDefaultOutputDevice(device.id, timeout: 2.0)
                 actualOutputDeviceUID = device.uid
                 mustRestoreOutputRoute = false
-                try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
+                if resumedOnFallback {
+                    try await waitForDeviceToStartRunning(device.id, timeout: 2.5)
+                } else {
+                    try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
+                }
             }
 
             if playWhenFinished {
-                stage = updateStage(.resumeMusic)
-                try musicMonitor.play()
-                didPause = false
-                playbackState = .playing
+                if !resumedOnFallback {
+                    stage = updateStage(.resumeMusic)
+                    try musicMonitor.play()
+                    didPause = false
+                    playbackState = .playing
+                }
 
                 // A longer stable window catches devices that briefly report the target
                 // rate and then fall back while Music recreates its output stream.
@@ -421,6 +495,11 @@ final class AppState: ObservableObject {
                 try await waitForDeviceToStartRunning(device.id, timeout: 1.5)
                 deviceSampleRate = postResumeRate
                 playbackState = .playing
+
+                if musicIsTemporarilyMuted, let originalMusicVolume {
+                    try musicMonitor.setSoundVolume(originalMusicVolume)
+                    musicIsTemporarilyMuted = false
+                }
             } else {
                 deviceSampleRate = confirmedRate
             }
@@ -533,6 +612,9 @@ final class AppState: ObservableObject {
         var needsResume = false
         var targetDevice: AudioDevice?
         var mustRestoreOutputRoute = false
+        var originalMusicVolume: Int?
+        var musicIsTemporarilyMuted = false
+        var resumedOnFallback = false
         defer {
             if mustRestoreOutputRoute, let targetDevice {
                 try? audioManager.setDefaultOutputDevice(targetDevice.id)
@@ -541,6 +623,9 @@ final class AppState: ObservableObject {
             if needsResume {
                 try? musicMonitor.play()
                 playbackState = .playing
+            }
+            if musicIsTemporarilyMuted, let originalMusicVolume {
+                try? musicMonitor.setSoundVolume(originalMusicVolume)
             }
             isSwitching = false
         }
@@ -552,25 +637,50 @@ final class AppState: ObservableObject {
             targetDevice = device
             let snapshot = try musicMonitor.snapshot()
             let wasPlaying = snapshot.state == .playing || playbackState == .playing
+            let fallback = device.requiresRouteReset
+                ? fallbackOutputDevice(excluding: device)
+                : nil
 
-            if wasPlaying {
-                statusText = text(.pauseMusic)
-                try musicMonitor.pause()
-                needsResume = true
-                playbackState = .paused
-                try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
+            if device.requiresRouteReset, fallback == nil {
+                throw CoreAudioError.propertyUnavailable(text(.noFallbackOutput))
             }
 
-            if device.requiresRouteReset {
-                guard let fallback = fallbackOutputDevice(excluding: device) else {
-                    throw CoreAudioError.propertyUnavailable(text(.noFallbackOutput))
+            if wasPlaying, let fallback {
+                originalMusicVolume = try musicMonitor.soundVolume()
+                if originalMusicVolume != 0 {
+                    try musicMonitor.setSoundVolume(0)
+                    musicIsTemporarilyMuted = true
                 }
+
                 statusText = text(.routeAway)
                 try audioManager.setDefaultOutputDevice(fallback.id)
                 mustRestoreOutputRoute = true
                 try await waitForDefaultOutputDevice(fallback.id, timeout: 2.0)
                 actualOutputDeviceUID = fallback.uid
+                try await waitForDeviceToStartRunning(fallback.id, timeout: 2.0)
+                try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
+
+                statusText = text(.pauseMusic)
+                try musicMonitor.pause()
+                needsResume = true
+                playbackState = .paused
                 try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
+            } else {
+                if wasPlaying {
+                    statusText = text(.pauseMusic)
+                    try musicMonitor.pause()
+                    needsResume = true
+                    playbackState = .paused
+                    try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
+                }
+                if let fallback {
+                    statusText = text(.routeAway)
+                    try audioManager.setDefaultOutputDevice(fallback.id)
+                    mustRestoreOutputRoute = true
+                    try await waitForDefaultOutputDevice(fallback.id, timeout: 2.0)
+                    actualOutputDeviceUID = fallback.uid
+                    try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
+                }
             }
 
             let sourceRate = track?.sampleRate ?? 0
@@ -578,6 +688,7 @@ final class AppState: ObservableObject {
                 ? sourceRate
                 : try audioManager.currentSampleRate(for: device.id)
             var currentRate = try audioManager.currentSampleRate(for: device.id)
+            var targetLockStartedAt = Date()
             if device.requiresRouteReset,
                abs(currentRate - targetRate) < 1,
                let relockRate = RateMatcher.relockRate(
@@ -596,6 +707,7 @@ final class AppState: ObservableObject {
             }
             if abs(currentRate - targetRate) >= 1 {
                 statusText = text(.writeRate)
+                targetLockStartedAt = Date()
                 try audioManager.setSampleRate(targetRate, for: device)
             }
             statusText = text(.waitDAC)
@@ -605,22 +717,49 @@ final class AppState: ObservableObject {
                 timeout: max(1.0, dacLockDelaySeconds) + 0.5,
                 stableFor: 0.4
             )
+            let remainingLockWait = dacLockDelaySeconds - Date().timeIntervalSince(targetLockStartedAt)
+            if remainingLockWait > 0 {
+                try await Task<Never, Never>.sleep(
+                    nanoseconds: UInt64(remainingLockWait * 1_000_000_000)
+                )
+            }
 
             if mustRestoreOutputRoute {
+                if wasPlaying, let fallback {
+                    statusText = text(.resumeMusic)
+                    try musicMonitor.play()
+                    needsResume = false
+                    resumedOnFallback = true
+                    playbackState = .playing
+                    try await waitForDeviceToStartRunning(fallback.id, timeout: 2.0)
+                    try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
+                }
+
                 statusText = text(.routeBack)
                 try audioManager.setDefaultOutputDevice(device.id)
                 try await waitForDefaultOutputDevice(device.id, timeout: 2.0)
                 actualOutputDeviceUID = device.uid
                 mustRestoreOutputRoute = false
-                try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
+                if resumedOnFallback {
+                    try await waitForDeviceToStartRunning(device.id, timeout: 2.5)
+                } else {
+                    try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
+                }
             }
 
             if wasPlaying {
-                statusText = text(.resumeMusic)
-                try musicMonitor.play()
-                needsResume = false
-                playbackState = .playing
+                if !resumedOnFallback {
+                    statusText = text(.resumeMusic)
+                    try musicMonitor.play()
+                    needsResume = false
+                    playbackState = .playing
+                }
                 try await waitForDeviceToStartRunning(device.id, timeout: 1.5)
+
+                if musicIsTemporarilyMuted, let originalMusicVolume {
+                    try musicMonitor.setSoundVolume(originalMusicVolume)
+                    musicIsTemporarilyMuted = false
+                }
             }
 
             lastAppliedTrackID = track?.persistentID

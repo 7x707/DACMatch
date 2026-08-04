@@ -23,6 +23,13 @@ struct AudioDevice: Identifiable, Hashable, Sendable {
     }
 }
 
+enum StreamRefreshPolicy {
+    static func requiresRefresh(previousTrackRate: Double?, newTrackRate: Double) -> Bool {
+        guard let previousTrackRate else { return true }
+        return abs(previousTrackRate - newTrackRate) >= 1
+    }
+}
+
 enum CoreAudioError: LocalizedError {
     case propertyUnavailable(String)
     case osStatus(OSStatus, String)

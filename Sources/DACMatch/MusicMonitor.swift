@@ -195,6 +195,30 @@ final class MusicMonitor {
         try runCommand(playAppleScript)
     }
 
+    func soundVolume() throws -> Int {
+        guard let appleScript = NSAppleScript(
+            source: "tell application \"Music\" to return sound volume"
+        ) else {
+            throw MusicMonitorError.scriptFailed("无法创建音量读取脚本")
+        }
+        var error: NSDictionary?
+        let result = appleScript.executeAndReturnError(&error)
+        if let error {
+            let message = error[NSAppleScript.errorMessage] as? String ?? error.description
+            throw MusicMonitorError.scriptFailed(message)
+        }
+        return Int(result.int32Value)
+    }
+
+    func setSoundVolume(_ volume: Int) throws {
+        let safeVolume = min(100, max(0, volume))
+        try runCommand(
+            NSAppleScript(
+                source: "tell application \"Music\" to set sound volume to \(safeVolume)"
+            )
+        )
+    }
+
     func playerPosition() throws -> Double {
         guard let appleScript = NSAppleScript(
             source: "tell application \"Music\" to return player position"

@@ -33,6 +33,27 @@ import Testing
     #expect(RateMatcher.relockRate(for: 48_000, availableRates: [48_000]) == nil)
 }
 
+@Test func sameRateTrackDoesNotRefreshAudioStream() {
+    #expect(
+        !StreamRefreshPolicy.requiresRefresh(
+            previousTrackRate: 44_100,
+            newTrackRate: 44_100
+        )
+    )
+    #expect(
+        StreamRefreshPolicy.requiresRefresh(
+            previousTrackRate: 44_100,
+            newTrackRate: 48_000
+        )
+    )
+    #expect(
+        StreamRefreshPolicy.requiresRefresh(
+            previousTrackRate: nil,
+            newTrackRate: 48_000
+        )
+    )
+}
+
 @Test func pausedMusicSnapshotKeepsCurrentTrack() throws {
     let separator = String(UnicodeScalar(30))
     let value = ["paused", "TRACK-1", "Example", "Artist", "96000"]
