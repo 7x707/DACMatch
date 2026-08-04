@@ -4,30 +4,6 @@
 
 ![DAC Match 图标](Resources/AppIcon.png)
 
-## 本地运行
-
-```bash
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift run --disable-sandbox DACMatch
-```
-
-首次读取 Apple Music 时，macOS 会询问是否允许 DAC Match 控制 Music。
-
-## 生成 App
-
-```bash
-chmod +x Scripts/package_app.sh
-Scripts/package_app.sh
-```
-
-如需从母版重新生成 macOS 图标：
-
-```bash
-chmod +x Scripts/make_icon.sh
-Scripts/make_icon.sh
-```
-
-生成结果位于 `outputs/DAC Match.app`。本地构建使用 ad-hoc 签名；若要分发，需要使用 Apple Developer ID 签名并公证。
-
 ## 当前范围
 
 - 每 0.4 秒检查一次 Apple Music 当前曲目和播放状态。
