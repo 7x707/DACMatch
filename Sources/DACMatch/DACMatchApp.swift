@@ -26,13 +26,14 @@ struct DACMatchApp: App {
             Image(systemName: "waveform")
                 .accessibilityLabel("DAC Match")
         case .iconAndRate:
-            HStack(spacing: 3) {
-                Image(systemName: "waveform")
-                Text(state.menuBarTitle)
-            }
+            Text("\(Image(systemName: "waveform"))  \(state.menuBarTitle)")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .monospacedDigit()
                 .accessibilityLabel("DAC Match \(state.menuBarTitle)")
         case .rateOnly:
             Text(state.menuBarTitle)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .monospacedDigit()
                 .accessibilityLabel("DAC Match \(state.menuBarTitle)")
         }
     }
@@ -40,8 +41,6 @@ struct DACMatchApp: App {
 
 private struct DACMatchPanel: View {
     @ObservedObject var state: AppState
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isPresented = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -97,26 +96,6 @@ private struct DACMatchPanel: View {
         }
         .padding(18)
         .frame(width: 370)
-        .opacity(isPresented ? 1 : 0)
-        .scaleEffect(isPresented ? 1 : 0.975, anchor: .top)
-        .offset(y: isPresented ? 0 : -5)
-        .blur(radius: isPresented ? 0 : 1.5)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: state.statusText)
-        .onAppear {
-            guard !reduceMotion else {
-                isPresented = true
-                return
-            }
-            isPresented = false
-            DispatchQueue.main.async {
-                withAnimation(.spring(response: 0.25, dampingFraction: 1.0)) {
-                    isPresented = true
-                }
-            }
-        }
-        .onDisappear {
-            isPresented = false
-        }
     }
 
     private var nowPlayingHeader: some View {
