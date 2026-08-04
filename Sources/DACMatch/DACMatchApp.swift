@@ -159,62 +159,60 @@ private struct DACMatchPanel: View {
 
             insetDivider
 
-            Menu {
-                if state.devices.isEmpty {
-                    Text("没有找到输出设备")
-                }
-                ForEach(state.devices) { device in
-                    Button {
-                        state.selectDevice(device)
-                    } label: {
-                        if device.uid == state.selectedDeviceUID {
-                            Label(device.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(device.displayName)
+            HStack(spacing: 11) {
+                settingTitle(icon: "hifispeaker", title: "输出设备")
+                Spacer(minLength: 10)
+                Menu {
+                    if state.devices.isEmpty {
+                        Text("没有找到输出设备")
+                    }
+                    ForEach(state.devices) { device in
+                        Button {
+                            state.selectDevice(device)
+                        } label: {
+                            if device.uid == state.selectedDeviceUID {
+                                Label(device.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(device.displayName)
+                            }
                         }
                     }
+                    Divider()
+                    Button("重新扫描") { state.refreshDevices() }
+                } label: {
+                    menuValueLabel(state.selectedDeviceName)
                 }
-                Divider()
-                Button("重新扫描") { state.refreshDevices() }
-            } label: {
-                settingLabel(
-                    icon: "hifispeaker",
-                    title: "输出设备",
-                    value: state.selectedDeviceName,
-                    showsChevron: true
-                )
-                .padding(12)
-                .contentShape(Rectangle())
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
             }
-            .menuStyle(.borderlessButton)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
 
             insetDivider
 
-            Menu {
-                ForEach([0.5, 1.0, 2.0, 3.0, 5.0], id: \.self) { seconds in
-                    Button {
-                        state.dacLockDelaySeconds = seconds
-                    } label: {
-                        if state.dacLockDelaySeconds == seconds {
-                            Label(delayLabel(seconds), systemImage: "checkmark")
-                        } else {
-                            Text(delayLabel(seconds))
+            HStack(spacing: 11) {
+                settingTitle(icon: "timer", title: "DAC 锁定等待")
+                Spacer(minLength: 10)
+                Menu {
+                    ForEach([0.5, 1.0, 2.0, 3.0, 5.0], id: \.self) { seconds in
+                        Button {
+                            state.dacLockDelaySeconds = seconds
+                        } label: {
+                            if state.dacLockDelaySeconds == seconds {
+                                Label(delayLabel(seconds), systemImage: "checkmark")
+                            } else {
+                                Text(delayLabel(seconds))
+                            }
                         }
                     }
+                } label: {
+                    menuValueLabel(delayLabel(state.dacLockDelaySeconds))
                 }
-            } label: {
-                settingLabel(
-                    icon: "timer",
-                    title: "DAC 锁定等待",
-                    value: delayLabel(state.dacLockDelaySeconds),
-                    showsChevron: true
-                )
-                .padding(12)
-                .contentShape(Rectangle())
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
             }
-            .menuStyle(.borderlessButton)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
 
             insetDivider
 
@@ -303,6 +301,42 @@ private struct DACMatchPanel: View {
                     .foregroundStyle(.tertiary)
             }
         }
+    }
+
+    private func settingTitle(icon: String, title: String) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+            Text(title)
+                .foregroundStyle(.primary)
+        }
+    }
+
+    private func menuValueLabel(_ value: String) -> some View {
+        HStack(spacing: 6) {
+            Text(value)
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: 155)
+        .background {
+            Capsule(style: .continuous)
+                .fill(Color.primary.opacity(0.07))
+                .overlay {
+                    Capsule(style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                }
+        }
+        .contentShape(Capsule(style: .continuous))
     }
 
     private var insetDivider: some View {
