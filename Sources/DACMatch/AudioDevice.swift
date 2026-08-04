@@ -288,6 +288,10 @@ enum RateMatcher {
         ranges.contains { rate >= $0.mMinimum && rate <= $0.mMaximum }
     }
 
+    static func supports(_ rate: Double, availableRates: [Double]) -> Bool {
+        availableRates.contains { abs($0 - rate) < 1 }
+    }
+
     static func needsSwitch(from currentRate: Double, to targetRate: Double) -> Bool {
         abs(currentRate - targetRate) >= 1
     }

@@ -142,6 +142,15 @@ final class AppState: ObservableObject {
 
     func recoverAudio() {
         guard !isSwitching, track != nil else { return }
+        if let track,
+           let device = actualOutputDevice ?? selectedDevice,
+           isKnownUnsupported(track.sampleRate, by: device) {
+            showResamplingStatus(
+                sourceRate: track.sampleRate,
+                outputRate: deviceSampleRate ?? (try? audioManager.currentSampleRate(for: device.id))
+            )
+            return
+        }
         isSwitching = true
         statusText = text(.rebuildingStream)
         diagnosticText = nil
@@ -267,6 +276,17 @@ final class AppState: ObservableObject {
 
             deviceSampleRate = currentRate
             lastAppliedTrackID = nil
+            if isKnownUnsupported(newTrack.sampleRate, by: device) {
+                switchAttemptsForTrack = 0
+                nextRetryDate = nil
+                diagnosticText = nil
+                lastAppliedTrackID = newTrack.persistentID
+                showResamplingStatus(
+                    sourceRate: newTrack.sampleRate,
+                    outputRate: currentRate
+                )
+                return
+            }
             if let nextRetryDate, nextRetryDate > Date() {
                 statusText = text(.waitingRetry)
                 return
@@ -611,6 +631,17 @@ final class AppState: ObservableObject {
         let delay = min(pow(2.0, attemptIndex) * 0.5, 3.0)
         nextRetryDate = Date().addingTimeInterval(delay)
         statusText = text(.retryAfter, delay)
+    }
+
+    private func isKnownUnsupported(_ rate: Double, by device: AudioDevice) -> Bool {
+        !device.availableSampleRates.isEmpty
+            && !RateMatcher.supports(rate, availableRates: device.availableSampleRates)
+    }
+
+    private func showResamplingStatus(sourceRate: Double, outputRate: Double?) {
+        let source = SampleRateFormatter.string(sourceRate)
+        let output = outputRate.map(SampleRateFormatter.string) ?? "—"
+        statusText = text(.resampling, source, output)
     }
 
     private func refreshDeviceRate() {

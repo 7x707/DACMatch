@@ -38,6 +38,12 @@ import Testing
     #expect(RateMatcher.needsSwitch(from: 44_100, to: 48_000))
 }
 
+@Test func availableRatesIdentifyUnsupportedSourceRate() {
+    let rates = [44_100.0, 48_000.0, 96_000.0]
+    #expect(RateMatcher.supports(48_000, availableRates: rates))
+    #expect(!RateMatcher.supports(88_200, availableRates: rates))
+}
+
 @Test func pausedMusicSnapshotKeepsCurrentTrack() throws {
     let separator = String(UnicodeScalar(30))
     let value = ["paused", "TRACK-1", "Example", "Artist", "96000"]

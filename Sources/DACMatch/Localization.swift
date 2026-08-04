@@ -18,7 +18,7 @@ enum AppLanguage: String, CaseIterable, Identifiable, Sendable {
 
 enum CopyKey: String, Sendable {
     case starting, switchingTo, rematching, rebuildingStream, noDAC
-    case selectSong, noRate, autoPaused, selectDAC, matched, prematched
+    case selectSong, noRate, autoPaused, selectDAC, matched, prematched, resampling
     case waitingRetry, outputMismatch, safeRateSwitch, preparingSwitch, pauseMusic
     case writeRate, waitDAC, resumeMusic, verifyOutput, matchedPlaying
     case prepareOutputSwitch, switchSystemOutput, confirmSystemOutput, writeNewRate
@@ -71,6 +71,7 @@ enum AppCopy {
             .selectDAC: "请选择输出 DAC",
             .matched: "采样率已匹配",
             .prematched: "已预匹配，等待播放",
+            .resampling: "DAC 不支持 %@，系统重采样为 %@",
             .waitingRetry: "等待自动重试…",
             .outputMismatch: "输出仍不匹配，请点“重新匹配”",
             .safeRateSwitch: "正在安全切换采样率…",
@@ -132,6 +133,7 @@ enum AppCopy {
             .selectDAC: "請選擇輸出 DAC",
             .matched: "取樣率已匹配",
             .prematched: "已預先匹配，等待播放",
+            .resampling: "DAC 不支援 %@，系統重新取樣為 %@",
             .waitingRetry: "等待自動重試…",
             .outputMismatch: "輸出仍不匹配，請按「重新匹配」",
             .safeRateSwitch: "正在安全切換取樣率…",
@@ -193,6 +195,7 @@ enum AppCopy {
             .selectDAC: "Select an output DAC",
             .matched: "Sample rate matched",
             .prematched: "Pre-matched, waiting for playback",
+            .resampling: "DAC doesn't support %@; macOS is resampling to %@",
             .waitingRetry: "Waiting to retry automatically…",
             .outputMismatch: "Output still does not match; choose Rematch",
             .safeRateSwitch: "Switching sample rate safely…",
