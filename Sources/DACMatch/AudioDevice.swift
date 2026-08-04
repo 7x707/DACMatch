@@ -11,6 +11,11 @@ struct AudioDevice: Identifiable, Hashable, Sendable {
     var displayName: String {
         isDefaultOutput ? "\(name)（当前默认）" : name
     }
+
+    var requiresTrackStreamRefresh: Bool {
+        name.localizedCaseInsensitiveContains("walkman")
+            || uid.localizedCaseInsensitiveContains("walkman")
+    }
 }
 
 enum CoreAudioError: LocalizedError {

@@ -201,7 +201,8 @@ final class AppState: ObservableObject {
                 refreshDeviceRate()
                 return
             }
-            if observedTrackID != newTrack.persistentID {
+            let trackChanged = observedTrackID != newTrack.persistentID
+            if trackChanged {
                 observedTrackID = newTrack.persistentID
                 switchAttemptsForTrack = 0
                 lastAppliedTrackID = nil
@@ -229,6 +230,29 @@ final class AppState: ObservableObject {
 
             let currentRate = try audioManager.currentSampleRate(for: device.id)
             if abs(currentRate - newTrack.sampleRate) < 1 {
+                if snapshot.state == .playing,
+                   device.requiresTrackStreamRefresh,
+                   lastAppliedTrackID != newTrack.persistentID {
+                    if let nextRetryDate, nextRetryDate > Date() {
+                        statusText = text(.waitingRetry)
+                        return
+                    }
+                    guard switchAttemptsForTrack < maximumSwitchAttempts else {
+                        statusText = text(.retryPaused)
+                        return
+                    }
+                    isSwitching = true
+                    switchAttemptsForTrack += 1
+                    statusText = text(.refreshingTrackStream)
+                    Task { @MainActor [weak self] in
+                        await self?.refreshMatchedTrackStream(
+                            trackID: newTrack.persistentID,
+                            rate: newTrack.sampleRate,
+                            device: device
+                        )
+                    }
+                    return
+                }
                 lastAppliedTrackID = newTrack.persistentID
                 deviceSampleRate = currentRate
                 nextRetryDate = nil
@@ -275,15 +299,11 @@ final class AppState: ObservableObject {
         playWhenFinished: Bool
     ) async {
         var didPause = false
-        var resumePosition: Double?
         var stage = text(.preparingSwitch)
         defer {
             if didPause {
                 do {
                     try musicMonitor.play()
-                    if let resumePosition {
-                        try? musicMonitor.setPlayerPosition(resumePosition)
-                    }
                 } catch {
                     setError(error)
                 }
@@ -293,7 +313,6 @@ final class AppState: ObservableObject {
 
         do {
             if musicWasPlaying {
-                resumePosition = try? musicMonitor.playerPosition()
                 stage = text(.pauseMusic)
                 try musicMonitor.pause()
                 didPause = true
@@ -320,11 +339,16 @@ final class AppState: ObservableObject {
                 stage = text(.resumeMusic)
                 try musicMonitor.play()
                 didPause = false
-                if let resumePosition {
-                    try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
-                    // Seeking nudges Music to refresh the stream, but failure to restore
-                    // an exact position must never invalidate a successful rate switch.
-                    try? musicMonitor.setPlayerPosition(resumePosition)
+
+                if device.requiresTrackStreamRefresh {
+                    // WALKMAN can accept the new clock while retaining a silent stream.
+                    // Open the stream once, then reopen it against the settled clock.
+                    try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
+                    try musicMonitor.pause()
+                    didPause = true
+                    try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
+                    try musicMonitor.play()
+                    didPause = false
                 }
 
                 // A longer stable window catches devices that briefly report the target
@@ -336,6 +360,7 @@ final class AppState: ObservableObject {
                     timeout: max(1.5, dacLockDelaySeconds + 0.6),
                     stableFor: 0.6
                 )
+                try await waitForDeviceToStartRunning(device.id, timeout: 1.5)
                 deviceSampleRate = postResumeRate
                 playbackState = .playing
             } else {
@@ -351,15 +376,51 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func refreshMatchedTrackStream(
+        trackID: String,
+        rate: Double,
+        device: AudioDevice
+    ) async {
+        var needsResume = false
+        defer {
+            if needsResume { try? musicMonitor.play() }
+            isSwitching = false
+        }
+
+        do {
+            try musicMonitor.pause()
+            needsResume = true
+            try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
+
+            deviceSampleRate = try await waitForStableSampleRate(
+                rate,
+                device: device,
+                timeout: max(0.8, dacLockDelaySeconds),
+                stableFor: 0.25
+            )
+
+            try musicMonitor.play()
+            needsResume = false
+            try await waitForDeviceToStartRunning(device.id, timeout: 1.5)
+
+            lastAppliedTrackID = trackID
+            switchAttemptsForTrack = 0
+            nextRetryDate = nil
+            diagnosticText = nil
+            playbackState = .playing
+            statusText = text(.matchedPlaying)
+        } catch {
+            scheduleRetry(afterFailureAt: text(.refreshingTrackStream), error: error)
+        }
+    }
+
     private func switchOutputDevice(to device: AudioDevice) async {
         var needsResume = false
-        var resumePosition: Double?
         var stage = text(.prepareOutputSwitch)
 
         defer {
             if needsResume {
                 try? musicMonitor.play()
-                if let resumePosition { try? musicMonitor.setPlayerPosition(resumePosition) }
             }
             isSwitching = false
         }
@@ -370,7 +431,6 @@ final class AppState: ObservableObject {
             let wasPlaying = snapshot.state == .playing
 
             if wasPlaying {
-                resumePosition = try? musicMonitor.playerPosition()
                 stage = text(.pauseMusic)
                 try musicMonitor.pause()
                 needsResume = true
@@ -413,10 +473,6 @@ final class AppState: ObservableObject {
                 stage = text(.resumeOnNew)
                 try musicMonitor.play()
                 needsResume = false
-                if let resumePosition {
-                    try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
-                    try? musicMonitor.setPlayerPosition(resumePosition)
-                }
 
                 stage = text(.confirmNewStream)
                 do {
@@ -430,10 +486,6 @@ final class AppState: ObservableObject {
                     try await Task<Never, Never>.sleep(nanoseconds: 450_000_000)
                     try musicMonitor.play()
                     needsResume = false
-                    if let resumePosition {
-                        try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
-                        try? musicMonitor.setPlayerPosition(resumePosition)
-                    }
                     try await waitForDeviceToStartRunning(device.id, timeout: 1.5)
                 }
             }
@@ -453,11 +505,9 @@ final class AppState: ObservableObject {
 
     private func rebuildAudioStream() async {
         var needsResume = false
-        let position = try? musicMonitor.playerPosition()
         defer {
             if needsResume {
                 try? musicMonitor.play()
-                if let position { try? musicMonitor.setPlayerPosition(position) }
             }
             isSwitching = false
         }
@@ -468,10 +518,6 @@ final class AppState: ObservableObject {
             try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
             try musicMonitor.play()
             needsResume = false
-            if let position {
-                try await Task<Never, Never>.sleep(nanoseconds: 250_000_000)
-                try? musicMonitor.setPlayerPosition(position)
-            }
             try await Task<Never, Never>.sleep(nanoseconds: 400_000_000)
             statusText = text(.streamRefreshed)
             diagnosticText = nil

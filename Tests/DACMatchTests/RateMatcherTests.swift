@@ -62,3 +62,23 @@ import Testing
         ) == "0.5 秒"
     )
 }
+
+@Test func walkmanDevicesRequestTrackStreamRefresh() {
+    let walkman = AudioDevice(
+        id: 1,
+        uid: "sony-walkman",
+        name: "WALKMAN",
+        availableSampleRates: [44_100, 48_000],
+        isDefaultOutput: true
+    )
+    let speakers = AudioDevice(
+        id: 2,
+        uid: "built-in-output",
+        name: "Mac mini Speakers",
+        availableSampleRates: [44_100, 48_000],
+        isDefaultOutput: false
+    )
+
+    #expect(walkman.requiresTrackStreamRefresh)
+    #expect(!speakers.requiresTrackStreamRefresh)
+}
