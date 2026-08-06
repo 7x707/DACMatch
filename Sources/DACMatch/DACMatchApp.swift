@@ -180,13 +180,7 @@ private struct DACMatchPanel: View {
     private var settingsCard: some View {
         VStack(spacing: 0) {
             Button {
-                if reduceMotion {
-                    settingsExpanded.toggle()
-                } else {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 1)) {
-                        settingsExpanded.toggle()
-                    }
-                }
+                settingsExpanded.toggle()
             } label: {
                 HStack(spacing: 11) {
                     Image(systemName: "slider.horizontal.3")
@@ -201,6 +195,10 @@ private struct DACMatchPanel: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.tertiary)
                         .rotationEffect(.degrees(settingsExpanded ? 90 : 0))
+                        .animation(
+                            reduceMotion ? nil : .easeOut(duration: 0.16),
+                            value: settingsExpanded
+                        )
                 }
                 .contentShape(Rectangle())
             }
@@ -290,7 +288,6 @@ private struct DACMatchPanel: View {
                     .toggleStyle(.switch)
                     .padding(12)
                 }
-                .transition(.opacity)
             }
         }
         .background {
@@ -322,7 +319,7 @@ private struct DACMatchPanel: View {
                 HStack(spacing: 4) {
                     Text(state.selectedDeviceName.uppercased())
                         .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        .truncationMode(.tail)
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .semibold))
                 }
