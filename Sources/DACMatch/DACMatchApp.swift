@@ -147,6 +147,9 @@ private struct DACMatchPanel: View {
 
                 outputRateMetric
             }
+            .transaction { transaction in
+                transaction.animation = nil
+            }
 
             if statusVisible {
                 Divider()
@@ -194,9 +197,6 @@ private struct DACMatchPanel: View {
                         .font(.body.weight(.medium))
                         .foregroundStyle(.primary)
                     Spacer(minLength: 8)
-                    Text(state.autoMatchEnabled ? state.text(.enabled) : state.text(.disabled))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.tertiary)
@@ -338,7 +338,6 @@ private struct DACMatchPanel: View {
             Text(state.deviceSampleRate.map(SampleRateFormatter.string) ?? "—")
                 .font(.system(size: 18, weight: .semibold, design: .rounded))
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -377,7 +376,6 @@ private struct DACMatchPanel: View {
             Text(value)
                 .font(.system(size: 18, weight: .semibold, design: .rounded))
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
