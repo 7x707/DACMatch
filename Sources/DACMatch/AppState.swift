@@ -20,11 +20,16 @@ final class AppState: ObservableObject {
             defaults.set(language.rawValue, forKey: Keys.language)
             diagnosticText = nil
             statusText = text(.starting)
-            poll()
+            scheduleMusicPoll(after: 0.12)
         }
     }
     @Published var autoMatchEnabled: Bool {
-        didSet { defaults.set(autoMatchEnabled, forKey: Keys.autoMatch) }
+        didSet {
+            defaults.set(autoMatchEnabled, forKey: Keys.autoMatch)
+            if autoMatchEnabled {
+                scheduleMusicPoll(after: 0.2)
+            }
+        }
     }
     @Published var menuBarDisplayMode: MenuBarDisplayMode {
         didSet { defaults.set(menuBarDisplayMode.rawValue, forKey: Keys.menuBarDisplayMode) }
@@ -41,9 +46,13 @@ final class AppState: ObservableObject {
     private let audioManager = CoreAudioDeviceManager()
     private let musicMonitor = MusicMonitor()
     private let sampleRateConfirmationTimeout: TimeInterval = 2.0
+    private let fallbackMusicPollInterval: TimeInterval = 5.0
     private var timer: Timer?
     private var pollingSuspendedUntil: Date?
-    private var presentationResumeTask: Task<Void, Never>?
+    private var pendingMusicPollTask: Task<Void, Never>?
+    private var musicNotificationObserver: NSObjectProtocol?
+    private var lastMusicPollDate: Date?
+    private var isPanelPresented = false
     private var lastAppliedTrackID: String?
     private var consecutiveErrorKey: String?
     private var isSwitching = false
@@ -86,11 +95,19 @@ final class AppState: ObservableObject {
     func start() {
         guard timer == nil else { return }
         refreshDevices()
-        poll()
+        observeMusicChanges()
+        scheduleMusicPoll(after: 0.2)
         timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, !self.isPollingSuspended else { return }
-                self.poll()
+                self.refreshLiveOutputState()
+                if self.lastDeviceRefreshDate == nil
+                    || Date().timeIntervalSince(self.lastDeviceRefreshDate!) >= 2 {
+                    self.refreshDevices()
+                }
+                if !self.isPanelPresented, self.musicPollIsStale {
+                    self.poll()
+                }
             }
         }
     }
@@ -98,29 +115,69 @@ final class AppState: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
-        presentationResumeTask?.cancel()
-        presentationResumeTask = nil
+        pendingMusicPollTask?.cancel()
+        pendingMusicPollTask = nil
+        if let musicNotificationObserver {
+            DistributedNotificationCenter.default().removeObserver(musicNotificationObserver)
+            self.musicNotificationObserver = nil
+        }
         catalogArtworkTask?.cancel()
         catalogArtworkTask = nil
     }
 
     /// Keeps synchronous Apple Music/Core Audio reads out of the native popover's
-    /// short presentation window, then immediately catches the UI up afterward.
+    /// short presentation window. Cached event-driven state is already available.
     func preparePanelPresentation() {
+        isPanelPresented = true
         let delay: TimeInterval = 0.3
         pollingSuspendedUntil = Date().addingTimeInterval(delay)
-        presentationResumeTask?.cancel()
-        presentationResumeTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard !Task.isCancelled, let self else { return }
-            self.pollingSuspendedUntil = nil
-            self.poll()
-        }
+    }
+
+    func panelDidDisappear() {
+        isPanelPresented = false
     }
 
     private var isPollingSuspended: Bool {
         guard let pollingSuspendedUntil else { return false }
         return Date() < pollingSuspendedUntil
+    }
+
+    private var musicPollIsStale: Bool {
+        guard let lastMusicPollDate else { return true }
+        return Date().timeIntervalSince(lastMusicPollDate) >= fallbackMusicPollInterval
+    }
+
+    private func observeMusicChanges() {
+        guard musicNotificationObserver == nil else { return }
+        musicNotificationObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.apple.Music.playerInfo"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.scheduleMusicPoll(after: 0.08)
+            }
+        }
+    }
+
+    private func scheduleMusicPoll(after delay: TimeInterval) {
+        pendingMusicPollTask?.cancel()
+        pendingMusicPollTask = Task { @MainActor [weak self] in
+            if delay > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
+            guard !Task.isCancelled, let self else { return }
+            if let suspendedUntil = self.pollingSuspendedUntil,
+               suspendedUntil > Date() {
+                let remaining = suspendedUntil.timeIntervalSinceNow
+                if remaining > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                }
+            }
+            guard !Task.isCancelled else { return }
+            self.pollingSuspendedUntil = nil
+            self.poll()
+        }
     }
 
     func refreshDevices() {
@@ -170,7 +227,7 @@ final class AppState: ObservableObject {
         nextRetryDate = nil
         diagnosticText = nil
         statusText = text(.rematching)
-        poll()
+        scheduleMusicPoll(after: 0.05)
     }
 
     func recoverAudio() {
@@ -225,6 +282,7 @@ final class AppState: ObservableObject {
     }
 
     private func poll() {
+        lastMusicPollDate = Date()
         refreshLiveOutputState()
         if isSwitching {
             if let track { loadArtworkIfNeeded(for: track) }

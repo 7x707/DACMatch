@@ -106,6 +106,9 @@ private struct DACMatchPanel: View {
         .onAppear {
             state.preparePanelPresentation()
         }
+        .onDisappear {
+            state.panelDidDisappear()
+        }
     }
 
     private var nowPlayingHeader: some View {
