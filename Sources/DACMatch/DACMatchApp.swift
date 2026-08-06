@@ -26,7 +26,7 @@ struct DACMatchApp: App {
             Image(systemName: "waveform")
                 .accessibilityLabel("DAC Match")
         case .iconAndRate:
-            HStack(alignment: .center, spacing: 6) {
+            HStack(alignment: .center, spacing: 8) {
                 Image(systemName: "waveform")
                 Text(state.menuBarTitle)
                     .monospacedDigit()
