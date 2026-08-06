@@ -107,7 +107,7 @@ final class AppState: ObservableObject {
     /// Keeps synchronous Apple Music/Core Audio reads out of the native popover's
     /// short presentation window, then immediately catches the UI up afterward.
     func preparePanelPresentation() {
-        let delay: TimeInterval = 0.18
+        let delay: TimeInterval = 0.3
         pollingSuspendedUntil = Date().addingTimeInterval(delay)
         presentationResumeTask?.cancel()
         presentationResumeTask = Task { @MainActor [weak self] in

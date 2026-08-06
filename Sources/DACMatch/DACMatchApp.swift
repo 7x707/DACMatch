@@ -48,7 +48,6 @@ struct DACMatchApp: App {
 
 private struct DACMatchPanel: View {
     @ObservedObject var state: AppState
-    @State private var isPresented = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -104,20 +103,8 @@ private struct DACMatchPanel: View {
         }
         .padding(18)
         .frame(width: 370)
-        .opacity(isPresented ? 1 : 0.88)
-        .scaleEffect(isPresented ? 1 : 0.985, anchor: .top)
-        .offset(y: isPresented ? 0 : -3)
         .onAppear {
             state.preparePanelPresentation()
-            isPresented = false
-            DispatchQueue.main.async {
-                withAnimation(.easeOut(duration: 0.14)) {
-                    isPresented = true
-                }
-            }
-        }
-        .onDisappear {
-            isPresented = false
         }
     }
 
