@@ -93,11 +93,14 @@ import Testing
     #expect(AppCopy.text(.rematch, language: .simplifiedChinese) == "重新匹配")
     #expect(AppCopy.text(.rematch, language: .traditionalChinese) == "重新匹配")
     #expect(AppCopy.text(.rematch, language: .english) == "Rematch")
+    #expect(AppCopy.text(.settings, language: .simplifiedChinese) == "设置")
+    #expect(AppCopy.text(.settings, language: .traditionalChinese) == "設定")
+    #expect(AppCopy.text(.settings, language: .english) == "Settings")
 }
 
 @Test func menuBarDisplayDefaultsToIconOnly() {
     #expect(MenuBarDisplayMode.defaultMode == .iconOnly)
-    #expect(AppCopy.text(.iconAndRate, language: .simplifiedChinese) == "图标和采样率")
+    #expect(MenuBarDisplayMode.allCases == [.iconOnly, .rateOnly])
 }
 
 @Test func localizedCopyFormatsValues() {

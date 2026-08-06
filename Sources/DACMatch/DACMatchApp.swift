@@ -25,16 +25,6 @@ struct DACMatchApp: App {
         case .iconOnly:
             Image(systemName: "waveform")
                 .accessibilityLabel("DAC Match")
-        case .iconAndRate:
-            HStack(alignment: .center, spacing: 8) {
-                Image(systemName: "waveform")
-                Text(state.menuBarTitle)
-                    .monospacedDigit()
-            }
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .fixedSize()
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("DAC Match \(state.menuBarTitle)")
         case .rateOnly:
             Text(state.menuBarTitle)
                 .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -46,6 +36,10 @@ struct DACMatchApp: App {
 
 private struct DACMatchPanel: View {
     @ObservedObject var state: AppState
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var settingsExpanded = false
+    @State private var statusVisible = true
+    @State private var statusHideTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -104,7 +98,11 @@ private struct DACMatchPanel: View {
         .onAppear {
             state.preparePanelPresentation()
         }
+        .onReceive(state.$statusText) { _ in
+            refreshStatusVisibility()
+        }
         .onDisappear {
+            statusHideTask?.cancel()
             state.panelDidDisappear()
         }
     }
@@ -147,23 +145,23 @@ private struct DACMatchPanel: View {
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(.tertiary)
 
-                rateMetric(
-                    title: state.selectedDeviceName.uppercased(),
-                    value: state.deviceSampleRate.map(SampleRateFormatter.string) ?? "—"
-                )
+                outputRateMetric
             }
 
-            Divider()
+            if statusVisible {
+                Divider()
 
-            HStack(spacing: 9) {
-                Image(systemName: statusSymbol)
-                    .font(.system(size: 15, weight: .semibold))
-                Text(state.statusText)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(2)
-                Spacer(minLength: 0)
+                HStack(spacing: 9) {
+                    Image(systemName: statusSymbol)
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(state.statusText)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(statusColor)
+                .transition(.opacity)
             }
-            .foregroundStyle(statusColor)
         }
         .padding(14)
         .background {
@@ -178,120 +176,171 @@ private struct DACMatchPanel: View {
 
     private var settingsCard: some View {
         VStack(spacing: 0) {
-            Toggle(isOn: $state.autoMatchEnabled) {
-                settingLabel(
-                    icon: "waveform.badge.checkmark",
-                    title: state.text(.autoMatch),
-                    value: state.autoMatchEnabled ? state.text(.enabled) : state.text(.disabled)
-                )
-            }
-            .toggleStyle(.switch)
-            .padding(12)
-
-            insetDivider
-
-            HStack(spacing: 11) {
-                settingTitle(icon: "menubar.rectangle", title: state.text(.menuBarDisplay))
-                Spacer(minLength: 10)
-                Menu {
-                    ForEach(MenuBarDisplayMode.allCases) { mode in
-                        Button {
-                            state.menuBarDisplayMode = mode
-                        } label: {
-                            if mode == state.menuBarDisplayMode {
-                                Label(state.text(mode.copyKey), systemImage: "checkmark")
-                            } else {
-                                Text(state.text(mode.copyKey))
-                            }
-                        }
+            Button {
+                if reduceMotion {
+                    settingsExpanded.toggle()
+                } else {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 1)) {
+                        settingsExpanded.toggle()
                     }
-                } label: {
-                    menuValueLabel(state.text(state.menuBarDisplayMode.copyKey))
                 }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
-            }
-            .padding(12)
-
-            insetDivider
-
-            HStack(spacing: 11) {
-                settingTitle(icon: "hifispeaker", title: state.text(.outputDevice))
-                Spacer(minLength: 10)
-                Menu {
-                    if state.devices.isEmpty {
-                        Text(state.text(.noDevices))
-                    }
-                    ForEach(state.devices) { device in
-                        Button {
-                            state.selectDevice(device)
-                        } label: {
-                            if device.uid == state.actualOutputDeviceUID {
-                                Label(deviceMenuName(device), systemImage: "checkmark")
-                            } else {
-                                Text(deviceMenuName(device))
-                            }
-                        }
-                    }
-                    Divider()
-                    Button(state.text(.rescan)) { state.refreshDevices() }
-                } label: {
-                    menuValueLabel(state.selectedDeviceName)
+            } label: {
+                HStack(spacing: 11) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20)
+                    Text(state.text(.settings))
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: 8)
+                    Text(state.autoMatchEnabled ? state.text(.enabled) : state.text(.disabled))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(settingsExpanded ? 90 : 0))
                 }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .padding(12)
 
-            insetDivider
+            if settingsExpanded {
+                Group {
+                    insetDivider
 
-            HStack(spacing: 11) {
-                settingTitle(icon: "globe", title: state.text(.language))
-                Spacer(minLength: 10)
-                Menu {
-                    ForEach(AppLanguage.allCases) { language in
-                        Button {
-                            state.language = language
-                        } label: {
-                            if language == state.language {
-                                Label(language.displayName, systemImage: "checkmark")
-                            } else {
-                                Text(language.displayName)
-                            }
-                        }
+                    Toggle(isOn: $state.autoMatchEnabled) {
+                        settingLabel(
+                            icon: "waveform.badge.checkmark",
+                            title: state.text(.autoMatch),
+                            value: state.autoMatchEnabled ? state.text(.enabled) : state.text(.disabled)
+                        )
                     }
-                } label: {
-                    menuValueLabel(state.language.displayName)
+                    .toggleStyle(.switch)
+                    .padding(12)
+
+                    insetDivider
+
+                    HStack(spacing: 11) {
+                        settingTitle(icon: "menubar.rectangle", title: state.text(.menuBarDisplay))
+                        Spacer(minLength: 10)
+                        Menu {
+                            ForEach(MenuBarDisplayMode.allCases) { mode in
+                                Button {
+                                    state.menuBarDisplayMode = mode
+                                } label: {
+                                    if mode == state.menuBarDisplayMode {
+                                        Label(state.text(mode.copyKey), systemImage: "checkmark")
+                                    } else {
+                                        Text(state.text(mode.copyKey))
+                                    }
+                                }
+                            }
+                        } label: {
+                            menuValueLabel(state.text(state.menuBarDisplayMode.copyKey))
+                        }
+                        .menuStyle(.button)
+                        .buttonStyle(.plain)
+                        .menuIndicator(.hidden)
+                    }
+                    .padding(12)
+
+                    insetDivider
+
+                    HStack(spacing: 11) {
+                        settingTitle(icon: "globe", title: state.text(.language))
+                        Spacer(minLength: 10)
+                        Menu {
+                            ForEach(AppLanguage.allCases) { language in
+                                Button {
+                                    state.language = language
+                                } label: {
+                                    if language == state.language {
+                                        Label(language.displayName, systemImage: "checkmark")
+                                    } else {
+                                        Text(language.displayName)
+                                    }
+                                }
+                            }
+                        } label: {
+                            menuValueLabel(state.language.displayName)
+                        }
+                        .menuStyle(.button)
+                        .buttonStyle(.plain)
+                        .menuIndicator(.hidden)
+                    }
+                    .padding(12)
+
+                    insetDivider
+
+                    Toggle(
+                        isOn: Binding(
+                            get: { state.launchAtLogin },
+                            set: { state.setLaunchAtLogin($0) }
+                        )
+                    ) {
+                        settingLabel(
+                            icon: "power",
+                            title: state.text(.launchAtLogin),
+                            value: state.launchAtLogin ? state.text(.enabled) : state.text(.disabled)
+                        )
+                    }
+                    .toggleStyle(.switch)
+                    .padding(12)
                 }
-                .menuStyle(.button)
-                .buttonStyle(.plain)
-                .menuIndicator(.hidden)
+                .transition(.opacity)
             }
-            .padding(12)
-
-            insetDivider
-
-            Toggle(
-                isOn: Binding(
-                    get: { state.launchAtLogin },
-                    set: { state.setLaunchAtLogin($0) }
-                )
-            ) {
-                settingLabel(
-                    icon: "power",
-                    title: state.text(.launchAtLogin),
-                    value: state.launchAtLogin ? state.text(.enabled) : state.text(.disabled)
-                )
-            }
-            .toggleStyle(.switch)
-            .padding(12)
         }
         .background {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.primary.opacity(0.035))
         }
+    }
+
+    private var outputRateMetric: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Menu {
+                if state.devices.isEmpty {
+                    Text(state.text(.noDevices))
+                }
+                ForEach(state.devices) { device in
+                    Button {
+                        state.selectDevice(device)
+                    } label: {
+                        if device.uid == state.actualOutputDeviceUID {
+                            Label(deviceMenuName(device), systemImage: "checkmark")
+                        } else {
+                            Text(deviceMenuName(device))
+                        }
+                    }
+                }
+                Divider()
+                Button(state.text(.rescan)) { state.refreshDevices() }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(state.selectedDeviceName.uppercased())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                }
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.7)
+                .foregroundStyle(.tertiary)
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+
+            Text(state.deviceSampleRate.map(SampleRateFormatter.string) ?? "—")
+                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var artworkView: some View {
@@ -398,6 +447,34 @@ private struct DACMatchPanel: View {
 
     private var insetDivider: some View {
         Divider().padding(.leading, 43)
+    }
+
+    private func refreshStatusVisibility() {
+        statusHideTask?.cancel()
+        if reduceMotion {
+            statusVisible = true
+        } else {
+            withAnimation(.easeOut(duration: 0.16)) {
+                statusVisible = true
+            }
+        }
+        guard shouldAutoHideMatchedStatus else { return }
+        statusHideTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled, shouldAutoHideMatchedStatus else { return }
+            if reduceMotion {
+                statusVisible = false
+            } else {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    statusVisible = false
+                }
+            }
+        }
+    }
+
+    private var shouldAutoHideMatchedStatus: Bool {
+        state.statusText == state.text(.matched)
+            || state.statusText == state.text(.matchedPlaying)
     }
 
     private var statusSymbol: String {
