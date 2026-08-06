@@ -26,9 +26,16 @@ struct DACMatchApp: App {
             Image(systemName: "waveform")
                 .accessibilityLabel("DAC Match")
         case .iconAndRate:
-            Text("\(Image(systemName: "waveform"))  \(state.menuBarTitle)")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .monospacedDigit()
+            Label {
+                Text(state.menuBarTitle)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+            } icon: {
+                Image(systemName: "waveform")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+                .labelStyle(.titleAndIcon)
+                .fixedSize()
                 .accessibilityLabel("DAC Match \(state.menuBarTitle)")
         case .rateOnly:
             Text(state.menuBarTitle)
@@ -41,6 +48,7 @@ struct DACMatchApp: App {
 
 private struct DACMatchPanel: View {
     @ObservedObject var state: AppState
+    @State private var isPresented = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -96,6 +104,21 @@ private struct DACMatchPanel: View {
         }
         .padding(18)
         .frame(width: 370)
+        .opacity(isPresented ? 1 : 0.88)
+        .scaleEffect(isPresented ? 1 : 0.985, anchor: .top)
+        .offset(y: isPresented ? 0 : -3)
+        .onAppear {
+            state.preparePanelPresentation()
+            isPresented = false
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: 0.14)) {
+                    isPresented = true
+                }
+            }
+        }
+        .onDisappear {
+            isPresented = false
+        }
     }
 
     private var nowPlayingHeader: some View {

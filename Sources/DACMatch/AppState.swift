@@ -42,6 +42,8 @@ final class AppState: ObservableObject {
     private let musicMonitor = MusicMonitor()
     private let sampleRateConfirmationTimeout: TimeInterval = 2.0
     private var timer: Timer?
+    private var pollingSuspendedUntil: Date?
+    private var presentationResumeTask: Task<Void, Never>?
     private var lastAppliedTrackID: String?
     private var consecutiveErrorKey: String?
     private var isSwitching = false
@@ -85,16 +87,40 @@ final class AppState: ObservableObject {
         guard timer == nil else { return }
         refreshDevices()
         poll()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.poll() }
+        timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, !self.isPollingSuspended else { return }
+                self.poll()
+            }
         }
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
+        presentationResumeTask?.cancel()
+        presentationResumeTask = nil
         catalogArtworkTask?.cancel()
         catalogArtworkTask = nil
+    }
+
+    /// Keeps synchronous Apple Music/Core Audio reads out of the native popover's
+    /// short presentation window, then immediately catches the UI up afterward.
+    func preparePanelPresentation() {
+        let delay: TimeInterval = 0.18
+        pollingSuspendedUntil = Date().addingTimeInterval(delay)
+        presentationResumeTask?.cancel()
+        presentationResumeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.pollingSuspendedUntil = nil
+            self.poll()
+        }
+    }
+
+    private var isPollingSuspended: Bool {
+        guard let pollingSuspendedUntil else { return false }
+        return Date() < pollingSuspendedUntil
     }
 
     func refreshDevices() {
