@@ -26,16 +26,14 @@ struct DACMatchApp: App {
             Image(systemName: "waveform")
                 .accessibilityLabel("DAC Match")
         case .iconAndRate:
-            Label {
-                Text(state.menuBarTitle)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .monospacedDigit()
-            } icon: {
+            HStack(alignment: .center, spacing: 6) {
                 Image(systemName: "waveform")
-                    .font(.system(size: 12, weight: .semibold))
+                Text(state.menuBarTitle)
+                    .monospacedDigit()
             }
-                .labelStyle(.titleAndIcon)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
                 .fixedSize()
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("DAC Match \(state.menuBarTitle)")
         case .rateOnly:
             Text(state.menuBarTitle)
